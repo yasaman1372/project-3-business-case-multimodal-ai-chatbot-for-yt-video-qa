@@ -3,6 +3,7 @@
 
 # --- API server ---
 fastapi
+python-multipart  # file uploads (spoken questions)
 
 # --- LLM / agent framework ---
 langchain

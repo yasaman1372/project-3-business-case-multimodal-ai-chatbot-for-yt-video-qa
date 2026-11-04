@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { endChat, sendMessage } from "./api.js";
+import { endChat, sendMessage, transcribeAudio } from "./api.js";
 import Illustration from "./Illustration.jsx";
 
 const TOOL_LABELS = {
@@ -28,6 +28,23 @@ const LOADING_STAGES = [
 ];
 
 const STORAGE_KEY = "yt-qa-chat";
+
+// Spoken questions: recorded with the microphone or uploaded as an audio/video file
+const MAX_RECORDING_SECONDS = 120;
+const MAX_UPLOAD_MB = 4; // must match MAX_AUDIO_MB on the server (Vercel caps uploads at 4.5 MB)
+const UPLOAD_TYPES = ".flac,.m4a,.mp3,.mp4,.mpeg,.mpga,.oga,.ogg,.wav,.webm";
+const CAN_RECORD = Boolean(navigator.mediaDevices?.getUserMedia) && typeof MediaRecorder !== "undefined";
+
+// File extension for what the browser records (Chrome/Firefox: webm or ogg, Safari: mp4)
+function recordingExtension(mimeType) {
+  if (mimeType.includes("mp4")) return "mp4";
+  if (mimeType.includes("ogg")) return "ogg";
+  return "webm";
+}
+
+function formatSeconds(total) {
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
 
 function loadSavedChat() {
   try {
@@ -66,6 +83,37 @@ function SendIcon() {
   );
 }
 
+function MicIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="2" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="5" y="5" width="14" height="14" rx="3" fill="currentColor" />
+    </svg>
+  );
+}
+
+function PaperclipIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function PlusIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -81,8 +129,15 @@ export default function App() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState(0);
+  // Voice input: "idle" | "recording" | "transcribing"
+  const [voice, setVoice] = useState("idle");
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [voiceError, setVoiceError] = useState(null);
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const recorderRef = useRef(null);
+  const recordingTimersRef = useRef([]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ threadId, messages }));
@@ -125,6 +180,64 @@ export default function App() {
       setLoading(false);
       inputRef.current?.focus();
     }
+  }
+
+  // Put the spoken question in the message box, so it can be checked before sending
+  async function transcribe(file, filename) {
+    setVoiceError(null);
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      setVoiceError(`That file is ${(file.size / 1024 / 1024).toFixed(1)} MB; the limit is ${MAX_UPLOAD_MB} MB.`);
+      return;
+    }
+    setVoice("transcribing");
+    try {
+      const { text } = await transcribeAudio(file, filename);
+      setInput((current) => (current.trim() ? `${current.trim()} ${text}` : text));
+    } catch (e) {
+      setVoiceError(e.message);
+    } finally {
+      setVoice("idle");
+      inputRef.current?.focus();
+    }
+  }
+
+  async function startRecording() {
+    setVoiceError(null);
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setVoiceError("Microphone access was blocked. Allow it in your browser to ask by voice.");
+      return;
+    }
+
+    const recorder = new MediaRecorder(stream);
+    const chunks = [];
+    recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    recorder.onstop = () => {
+      stream.getTracks().forEach((track) => track.stop()); // turn the microphone off
+      recordingTimersRef.current.forEach(clearTimeout);
+      const type = recorder.mimeType || "audio/webm";
+      transcribe(new Blob(chunks, { type }), `question.${recordingExtension(type)}`);
+    };
+    recorder.start();
+    recorderRef.current = recorder;
+    setVoice("recording");
+    setRecordingSeconds(0);
+    recordingTimersRef.current = [
+      setInterval(() => setRecordingSeconds((s) => s + 1), 1000),
+      setTimeout(stopRecording, MAX_RECORDING_SECONDS * 1000),
+    ];
+  }
+
+  function stopRecording() {
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+  }
+
+  function handleFileChosen(e) {
+    const file = e.target.files[0];
+    e.target.value = ""; // allow choosing the same file again
+    if (file) transcribe(file, file.name);
   }
 
   function newChat() {
@@ -273,13 +386,58 @@ export default function App() {
             disabled={loading}
             autoFocus
           />
-          <button type="submit" className="send-button" disabled={loading || !input.trim()} aria-label="Send">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={UPLOAD_TYPES}
+            onChange={handleFileChosen}
+            hidden
+          />
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={loading || voice !== "idle"}
+            aria-label="Upload an audio or video question"
+            title="Upload an audio or video question"
+          >
+            <PaperclipIcon />
+          </button>
+          {CAN_RECORD && (
+            <button
+              type="button"
+              className={`icon-button ${voice === "recording" ? "recording" : ""}`}
+              onClick={voice === "recording" ? stopRecording : startRecording}
+              disabled={loading || voice === "transcribing"}
+              aria-label={voice === "recording" ? "Stop recording" : "Ask by voice"}
+              title={voice === "recording" ? "Stop recording" : "Ask by voice"}
+            >
+              {voice === "recording" ? <StopIcon /> : <MicIcon />}
+            </button>
+          )}
+          <button
+            type="submit"
+            className="send-button"
+            disabled={loading || voice !== "idle" || !input.trim()}
+            aria-label="Send"
+          >
             <SendIcon />
           </button>
         </form>
-        <p className="hint">
-          Enter to send · Shift + Enter for a new line · A new topic takes ~30s while videos are found
-        </p>
+        {voice === "recording" ? (
+          <p className="hint voice-status">
+            <span className="rec-dot" /> Recording {formatSeconds(recordingSeconds)} /{" "}
+            {formatSeconds(MAX_RECORDING_SECONDS)} · press ■ when you're done
+          </p>
+        ) : voice === "transcribing" ? (
+          <p className="hint voice-status">Turning your question into text…</p>
+        ) : voiceError ? (
+          <p className="hint hint-error">{voiceError}</p>
+        ) : (
+          <p className="hint">
+            Enter to send · 🎤 ask by voice or 📎 upload an audio/video clip · A new topic takes ~30s
+          </p>
+        )}
       </footer>
     </div>
   );

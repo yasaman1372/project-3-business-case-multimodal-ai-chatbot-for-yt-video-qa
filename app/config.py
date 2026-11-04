@@ -53,6 +53,10 @@ EMBEDDING_DIMENSIONS = 1536  # must match the Pinecone index
 CHAT_MODEL = "gpt-5.4-mini"
 REASONING_EFFORT = "low"     # low = faster answers; raise for harder questions
 
+# --- Speech-to-text (questions asked by voice or as an audio/video file) ---
+TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"  # ~$0.003/min; "whisper-1" also works (~$0.006/min)
+MAX_AUDIO_MB = 4             # Vercel rejects request bodies over 4.5 MB
+
 # --- Retrieval ---
 RETRIEVAL_K = 4              # chunks returned per search
 MIN_RELEVANCE_SCORE = 0.25   # drop chunks less similar than this (cosine, 0-1); measured:

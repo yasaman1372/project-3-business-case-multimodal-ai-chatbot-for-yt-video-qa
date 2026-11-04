@@ -623,6 +623,54 @@ button:disabled {
   color: var(--text-dim);
 }
 
+.hint-error {
+  color: #ffb4b4;
+}
+
+.voice-status {
+  color: var(--text-soft);
+}
+
+.rec-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: var(--red);
+  animation: blink 1s ease-in-out infinite;
+}
+
+/* Microphone and upload buttons, next to Send */
+.icon-button {
+  flex: 0 0 40px;
+  height: 40px;
+  margin-bottom: 2px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: var(--text-soft);
+  background: transparent;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.icon-button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-strong);
+  border-color: var(--border);
+}
+
+.icon-button:disabled {
+  opacity: 0.35;
+}
+
+.icon-button.recording {
+  color: white;
+  background: var(--red);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
 /* ============ Animations ============ */
 
 @keyframes rise {
@@ -643,6 +691,11 @@ button:disabled {
 @keyframes bounce {
   0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
   40% { transform: translateY(-6px); opacity: 1; }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
 }
 
 @keyframes shimmer {

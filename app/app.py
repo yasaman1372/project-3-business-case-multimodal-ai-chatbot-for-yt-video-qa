@@ -8,6 +8,7 @@ Endpoints (all under /api so the React app and the API share one domain on Verce
     POST   /api/chat                {"message", "thread_id"?} -> {"answer", "thread_id", "tools_used", "seconds"}
     GET    /api/chat/{id}/videos    videos found so far in a conversation
     DELETE /api/chat/{id}           end a conversation: delete its videos/embeddings
+    POST   /api/transcribe          audio/video file (form field "file") -> {"text"}: a spoken question as text
 
 Run locally:
     uvicorn app.app:app --reload --port 8000
@@ -17,13 +18,15 @@ Run locally:
 import logging
 import time
 
-from fastapi import FastAPI, HTTPException, Path
+import openai
+from fastapi import FastAPI, File, HTTPException, Path, UploadFile
 from pydantic import BaseModel, Field
 
 from app.agent import chat
 from app.config import CHAT_MODEL
 from app.memory import get_checkpointer
 from app.retrieval import list_videos
+from app.speech import MAX_AUDIO_BYTES, SpeechError, transcribe_question
 from ingestion.vector_store import chat_namespace, delete_namespace, new_thread_id
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,10 @@ class ChatResponse(BaseModel):
     thread_id: str
     tools_used: list[str]
     seconds: float
+
+
+class TranscribeResponse(BaseModel):
+    text: str
 
 
 class Video(BaseModel):
@@ -95,3 +102,18 @@ def end_chat(thread_id: str = Path(..., pattern=THREAD_ID_PATTERN)) -> dict:
     if hasattr(checkpointer, "delete_thread"):
         checkpointer.delete_thread(thread_id)
     return {"deleted": thread_id}
+
+
+@app.post("/api/transcribe", response_model=TranscribeResponse)
+def transcribe_endpoint(file: UploadFile = File(...)) -> dict:
+    """Turn a recorded or uploaded question (audio or video) into text."""
+    audio = file.file.read(MAX_AUDIO_BYTES + 1)  # one byte over the limit is enough to reject it
+    try:
+        return {"text": transcribe_question(audio, file.filename or "question.webm")}
+    except SpeechError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except openai.BadRequestError as e:
+        raise HTTPException(status_code=400, detail=f"The audio could not be read: {e.message}")
+    except Exception as e:
+        logger.exception("Transcription failed")
+        raise HTTPException(status_code=502, detail=f"Speech recognition failed: {e}")
