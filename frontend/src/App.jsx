@@ -1,19 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { fetchVideos, sendMessage } from "./api.js";
+import { endChat, sendMessage } from "./api.js";
+import Illustration from "./Illustration.jsx";
 
 const TOOL_LABELS = {
-  search_video_transcripts: "🔍 Searched transcripts",
-  list_available_videos: "📋 Listed videos",
-  get_video_transcript: "📄 Read full transcript",
-  find_and_add_videos: "➕ Added new videos",
+  search_video_transcripts: { icon: "🔍", label: "Searched transcripts" },
+  find_videos_on_topic: { icon: "🎬", label: "Found videos on YouTube" },
+  list_videos_in_this_chat: { icon: "📚", label: "Listed chat videos" },
+  get_video_transcript: { icon: "📄", label: "Read full transcript" },
 };
 
+// One question per subject. The first question on a topic finds videos on YouTube.
 const SUGGESTIONS = [
-  "What is inside a black hole?",
-  "Which videos do you have?",
-  "Summarise the Kurzgesagt video",
-  "Find videos about the James Webb telescope",
+  { icon: "🕳️", title: "What is inside a black hole?", hint: "Space · Astrophysics" },
+  { icon: "🎨", title: "Why is Van Gogh's The Starry Night so famous?", hint: "Art · Painting" },
+  { icon: "🏛️", title: "Why did the Roman Empire fall?", hint: "History · Ancient Rome" },
+  { icon: "🏃", title: "What's the science behind running faster?", hint: "Sport · Sprinting" },
+];
+
+// Progress messages while waiting: [seconds after sending, text]
+const LOADING_STAGES = [
+  [0, "Thinking"],
+  [4, "Searching YouTube for videos"],
+  [10, "Reading the transcripts"],
+  [20, "Embedding the videos into this chat"],
+  [35, "Almost there, writing the answer"],
 ];
 
 const STORAGE_KEY = "yt-qa-chat";
@@ -31,33 +42,60 @@ const markdownComponents = {
   a: ({ node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
 };
 
+function Logo({ size = 36 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true">
+      <defs>
+        <linearGradient id="logo-gradient" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#ff5a45" />
+          <stop offset="55%" stopColor="#ff8a3d" />
+          <stop offset="100%" stopColor="#ffc04d" />
+        </linearGradient>
+      </defs>
+      <rect x="2" y="6" width="36" height="28" rx="9" fill="url(#logo-gradient)" />
+      <path d="M17 14.5v11l9-5.5z" fill="#fff" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export default function App() {
   const saved = loadSavedChat();
   const [threadId, setThreadId] = useState(saved.threadId);
   const [messages, setMessages] = useState(saved.messages);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [slow, setSlow] = useState(false);
-  const [videos, setVideos] = useState([]);
-  const [videosError, setVideosError] = useState(null);
+  const [stage, setStage] = useState(0);
   const bottomRef = useRef(null);
-
-  const loadVideos = () =>
-    fetchVideos()
-      .then((v) => {
-        setVideos(v);
-        setVideosError(null);
-      })
-      .catch((e) => setVideosError(e.message));
-
-  useEffect(() => {
-    loadVideos();
-  }, []);
+  const inputRef = useRef(null);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ threadId, messages }));
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [threadId, messages, loading]);
+
+  // Grow the textarea with its content (up to the CSS max-height)
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [input]);
 
   async function send(text) {
     const message = text.trim();
@@ -66,7 +104,12 @@ export default function App() {
     setInput("");
     setMessages((m) => [...m, { role: "user", content: message }]);
     setLoading(true);
-    const slowTimer = setTimeout(() => setSlow(true), 10000);
+    setStage(0);
+    // Advance the progress message. A follow-up on a known topic usually answers
+    // before the later stages appear.
+    const stageTimers = LOADING_STAGES.slice(1).map(([seconds], i) =>
+      setTimeout(() => setStage(i + 1), seconds * 1000)
+    );
 
     try {
       const data = await sendMessage(message, threadId);
@@ -75,19 +118,21 @@ export default function App() {
         ...m,
         { role: "assistant", content: data.answer, tools: data.tools_used, seconds: data.seconds },
       ]);
-      if (data.tools_used.includes("find_and_add_videos")) loadVideos();
     } catch (e) {
       setMessages((m) => [...m, { role: "error", content: e.message }]);
     } finally {
-      clearTimeout(slowTimer);
+      stageTimers.forEach(clearTimeout);
       setLoading(false);
-      setSlow(false);
+      inputRef.current?.focus();
     }
   }
 
   function newChat() {
+    // Delete the old chat's videos and embeddings on the server (no need to wait)
+    if (threadId) endChat(threadId).catch(() => {});
     setThreadId(null);
     setMessages([]);
+    inputRef.current?.focus();
   }
 
   function handleKeyDown(e) {
@@ -97,86 +142,119 @@ export default function App() {
     }
   }
 
-  // Group sidebar videos by topic
-  const byTopic = videos.reduce((groups, v) => {
-    const topic = v.topic || "Other";
-    (groups[topic] ||= []).push(v);
-    return groups;
-  }, {});
+  const isEmpty = messages.length === 0;
 
   return (
-    <div className="layout">
-      <aside className="sidebar">
-        <h2>📚 Indexed videos</h2>
-        {videosError && <p className="muted">Couldn't load videos: {videosError}</p>}
-        {!videosError && videos.length === 0 && <p className="muted">No videos yet.</p>}
-        {Object.entries(byTopic).map(([topic, list]) => (
-          <section key={topic}>
-            <h3>{topic}</h3>
-            <ul>
-              {list.map((v) => (
-                <li key={v.video_id}>
-                  <a href={v.url} target="_blank" rel="noreferrer">
-                    {v.title || v.video_id}
-                  </a>
-                  {v.channel && <span className="muted"> · {v.channel}</span>}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
-      </aside>
+    <div className="app">
+      <div className="backdrop" aria-hidden="true">
+        <Illustration />
+      </div>
 
-      <main className="chat">
-        <header>
-          <h1>🎬 YouTube Video QA</h1>
-          <button className="secondary" onClick={newChat} disabled={loading}>
-            New chat
-          </button>
-        </header>
+      <header className="topbar">
+        <div className="brand">
+          <Logo />
+          <div>
+            <h1>
+              Video<span className="gradient-text">QA</span>
+            </h1>
+            <p>Ask YouTube videos anything</p>
+          </div>
+        </div>
+        <button className="ghost-button" onClick={newChat} disabled={loading || isEmpty}>
+          <PlusIcon /> New chat
+        </button>
+      </header>
 
-        <div className="messages">
-          {messages.length === 0 && (
-            <div className="empty">
-              <p>Ask anything about the indexed videos. Answers link to the exact moment in the video.</p>
-              <div className="suggestions">
-                {SUGGESTIONS.map((s) => (
-                  <button key={s} className="secondary" onClick={() => send(s)}>
-                    {s}
-                  </button>
-                ))}
-              </div>
+      <main className="conversation">
+        {isEmpty && (
+          <section className="hero">
+            <div className="hero-logo">
+              <Logo size={72} />
             </div>
-          )}
+            <h2>
+              Ask anything.
+              <br />
+              <span className="gradient-text">Jump to the exact moment.</span>
+            </h2>
+            <p>
+              Ask about any topic. I find YouTube videos on it, read their transcripts, and answer
+              with links that open each video at the second it's explained.
+            </p>
+            <div className="suggestions">
+              {SUGGESTIONS.map((s, i) => (
+                <button
+                  key={s.title}
+                  className="suggestion"
+                  style={{ animationDelay: `${150 + i * 80}ms` }}
+                  onClick={() => send(s.title)}
+                >
+                  <span className="suggestion-icon">{s.icon}</span>
+                  <span>
+                    <strong>{s.title}</strong>
+                    <small>{s.hint}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
-          {messages.map((m, i) => (
-            <div key={i} className={`message ${m.role}`}>
-              {m.role === "assistant" ? (
-                <>
+        {messages.map((m, i) =>
+          m.role === "user" ? (
+            <div key={i} className="row user">
+              <div className="bubble user-bubble">{m.content}</div>
+            </div>
+          ) : m.role === "assistant" ? (
+            <div key={i} className="row assistant">
+              <div className="avatar">
+                <Logo size={22} />
+              </div>
+              <div className="bubble assistant-bubble">
+                <div className="markdown">
                   <ReactMarkdown components={markdownComponents}>{m.content}</ReactMarkdown>
+                </div>
+                {(m.tools?.length > 0 || m.seconds != null) && (
                   <div className="meta">
                     {m.tools?.map((t, j) => (
                       <span key={j} className="chip">
-                        {TOOL_LABELS[t] || t}
+                        <span>{TOOL_LABELS[t]?.icon || "🛠️"}</span>
+                        {TOOL_LABELS[t]?.label || t}
                       </span>
                     ))}
-                    {m.seconds != null && <span className="muted">{m.seconds}s</span>}
+                    {m.seconds != null && <span className="time">⚡ {m.seconds}s</span>}
                   </div>
-                </>
-              ) : (
-                m.content
-              )}
+                )}
+              </div>
             </div>
-          ))}
-
-          {loading && (
-            <div className="message assistant thinking">
-              {slow ? "Still working… adding new videos can take up to a minute." : "Thinking…"}
+          ) : (
+            <div key={i} className="row assistant">
+              <div className="avatar error-avatar">!</div>
+              <div className="bubble error-bubble">
+                <strong>Something went wrong.</strong> {m.content}
+              </div>
             </div>
-          )}
-          <div ref={bottomRef} />
-        </div>
+          )
+        )}
 
+        {loading && (
+          <div className="row assistant">
+            <div className="avatar pulsing">
+              <Logo size={22} />
+            </div>
+            <div className="bubble assistant-bubble thinking">
+              <span className="dots">
+                <i />
+                <i />
+                <i />
+              </span>
+              <span className="shimmer">{LOADING_STAGES[stage][1]}…</span>
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </main>
+
+      <footer className="composer-wrap">
         <form
           className="composer"
           onSubmit={(e) => {
@@ -185,19 +263,24 @@ export default function App() {
           }}
         >
           <textarea
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about the videos…  (Enter to send, Shift+Enter for a new line)"
-            rows={2}
+            placeholder="Ask about any topic…"
+            rows={1}
             maxLength={2000}
             disabled={loading}
+            autoFocus
           />
-          <button type="submit" disabled={loading || !input.trim()}>
-            Send
+          <button type="submit" className="send-button" disabled={loading || !input.trim()} aria-label="Send">
+            <SendIcon />
           </button>
         </form>
-      </main>
+        <p className="hint">
+          Enter to send · Shift + Enter for a new line · A new topic takes ~30s while videos are found
+        </p>
+      </footer>
     </div>
   );
 }

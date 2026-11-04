@@ -7,7 +7,6 @@ tests/
 evaluation/
 presentation/
 docs/
-Claude outputs/
 frontend/node_modules/
 frontend/dist/
 **/__pycache__/

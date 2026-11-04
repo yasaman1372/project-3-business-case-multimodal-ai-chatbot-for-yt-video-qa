@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --navy: #1b2340;
+    --blue: #2a46c8;
+    --green: #1f8a3b;
+    --orange: #e0701a;
+    --purple: #6a3fc9;
+    --text: #1d1d22;
+    --muted: #5c5f6b;
+    --mono: "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 2000px;
+    background: #fff;
+    font-family: -apple-system, "Inter", "Helvetica Neue", Arial, sans-serif;
+    color: var(--text);
+    padding: 40px 46px 36px;
+  }
+  h1 { text-align: center; font-size: 60px; font-weight: 900; letter-spacing: 1px; color: var(--navy); }
+  .subtitle { text-align: center; font-size: 27px; font-weight: 700; letter-spacing: 4px; color: var(--navy); margin-top: 6px; }
+
+  .grid { display: grid; grid-template-columns: 550px 1fr 412px; gap: 34px; margin-top: 34px; align-items: start; }
+  .panel { border: 3px solid; border-radius: 16px; padding: 20px 20px 22px; }
+  .panel > h2 { font-size: 25px; font-weight: 800; letter-spacing: .3px; }
+  .panel > .sub { font-size: 16px; margin: 4px 0 16px; line-height: 1.35; }
+  .blue { border-color: var(--blue); } .blue > h2, .blue > .sub { color: var(--blue); }
+  .green { border-color: var(--green); } .green > h2, .green > .sub { color: var(--green); }
+  .orange { border-color: var(--orange); } .orange > h2 { color: var(--orange); }
+  .purple { border-color: var(--purple); } .purple > h2 { color: var(--purple); }
+
+  .card { border: 2px solid; border-radius: 10px; padding: 12px 14px; display: flex; gap: 14px; align-items: flex-start; background: #fff; }
+  .blue .card { border-color: #5b73d9; }
+  .green .card { border-color: #49a462; }
+  .card h3 { font-size: 19px; font-weight: 700; margin-bottom: 3px; }
+  .card p { font-size: 14.5px; line-height: 1.38; color: #2c2e36; }
+  .card code, .file { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+  .file { display: block; margin-top: 4px; }
+  .dashed { border-style: dashed !important; }
+
+  .icon { flex: 0 0 52px; height: 52px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 26px; color: #fff; font-weight: 800; }
+  .num { flex: 0 0 30px; height: 30px; border-radius: 50%; background: var(--blue); color: #fff; font-weight: 700; font-size: 16px; display: flex; align-items: center; justify-content: center; margin-top: 12px; }
+
+  .arrow { text-align: center; color: var(--blue); font-size: 22px; line-height: 1; height: 26px; display: flex; align-items: center; justify-content: center; }
+  .green .arrow { color: var(--green); }
+  .arrow::before { content: ""; display: block; width: 2.5px; height: 14px; background: currentColor; }
+  .arrow::after { content: ""; position: absolute; }
+  .arrow span { display: block; }
+  .arr { display: flex; flex-direction: column; align-items: center; height: 26px; justify-content: center; }
+  .arr i { display: block; width: 2.5px; height: 13px; background: currentColor; }
+  .arr b { display: block; width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 9px solid currentColor; }
+  .blue .arr { color: var(--blue); } .green .arr { color: var(--green); } .purple .arr { color: var(--purple); }
+
+  .chips { border: 2px dashed #5b73d9; border-radius: 10px; padding: 12px; margin-top: 2px; }
+  .chips h4 { text-align: center; color: var(--blue); font-size: 16.5px; margin-bottom: 9px; }
+  .chip { display: inline-block; font-family: var(--mono); font-size: 13px; color: var(--blue); border: 1.5px solid #5b73d9; border-radius: 6px; padding: 3px 8px; margin: 0 4px 6px 0; }
+
+  .row { display: flex; gap: 16px; align-items: stretch; }
+  .row > .card { flex: 1; }
+  .center { display: flex; justify-content: center; }
+  .center > .card { width: 70%; }
+
+  .tools { border: 3px solid var(--orange); border-radius: 12px; padding: 12px 14px 14px; }
+  .tools h3 { text-align: center; color: var(--orange); font-size: 19px; margin-bottom: 10px; }
+  .tools h3 code { font-family: var(--mono); font-size: 15px; color: var(--orange); font-weight: 500; }
+  .tool-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .tool { border: 2px solid #f0a868; border-radius: 9px; padding: 9px 6px 8px; text-align: center; }
+  .tool .t-icon { font-size: 20px; color: var(--orange); }
+  .tool strong { display: block; font-size: 14.5px; margin: 3px 0 2px; }
+  .tool code { font-family: var(--mono); font-size: 11.5px; color: var(--muted); display: block; }
+  .tool p { font-size: 12.5px; color: #3a3c44; margin-top: 4px; line-height: 1.3; }
+
+  .side p { font-size: 15.5px; line-height: 1.45; margin-bottom: 6px; }
+  .side p b { font-weight: 700; }
+  .side .file { font-size: 13px; margin-top: 8px; }
+  .side + .side { margin-top: 26px; }
+  .tree { font-family: var(--mono); font-size: 13.6px; line-height: 1.62; white-space: pre; color: var(--text); margin-top: 6px; }
+  .tree .c { color: #8a8d99; }
+  .badge { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 1px 7px; border-radius: 99px; vertical-align: 2px; margin-left: 4px; }
+  .planned { background: #fff1e0; color: #b45309; border: 1px solid #f3c48b; }
+  .done { background: #e3f4e7; color: #1f7a36; border: 1px solid #9bd3a9; }
+
+  .output { margin-top: 34px; border: 3px solid var(--purple); border-radius: 16px; padding: 18px 20px 22px; }
+  .output h2 { text-align: center; color: var(--purple); font-size: 25px; font-weight: 800; margin-bottom: 16px; }
+  .out-row { display: flex; align-items: stretch; gap: 0; }
+  .out-row .card { flex: 1; border-color: #8e6ad8; }
+  .h-arr { flex: 0 0 44px; display: flex; align-items: center; justify-content: center; color: var(--purple); }
+  .h-arr i { display: block; width: 18px; height: 2.5px; background: currentColor; }
+  .h-arr b { display: block; width: 0; height: 0; border-top: 7px solid transparent; border-bottom: 7px solid transparent; border-left: 9px solid currentColor; }
+
+  .legend { display: flex; justify-content: center; gap: 34px; margin-top: 24px; font-size: 16px; color: #33353d; }
+  .legend span { display: flex; align-items: center; gap: 10px; }
+  .legend i { display: inline-block; width: 46px; height: 3px; }
+  .legend i.d { height: 0; border-top: 3px dashed #555; }
+  .footer { margin: 18px auto 0; width: fit-content; border: 2px solid var(--blue); border-radius: 8px; padding: 9px 22px; color: var(--blue); font-size: 17px; }
+  .loop { margin-top: 12px; border: 2px dashed var(--orange); border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1.4; color: #6b3a0c; background: #fffaf3; }
+  .loop b { color: var(--orange); }
+</style>
+</head>
+<body>
+  <h1>YOUTUBE VIDEO QA CHATBOT</h1>
+  <div class="subtitle">MULTIMODAL RAG · ARCHITECTURE OVERVIEW</div>
+
+  <div class="grid">
+    <!-- ================= OFFLINE ================= -->
+    <div class="panel blue">
+      <h2>INDEXING PIPELINE</h2>
+      <div class="sub">Runs locally (<code style="font-family:var(--mono)">ingestion/build_index.py</code>) and live when the agent adds videos on a new topic</div>
+
+      <div class="card">
+        <div class="icon" style="background:#e62117">▶</div>
+        <div><h3>Find Videos by Topic</h3>
+          <p>YouTube Data API v3 search · filter 3–40 min · skip already indexed</p>
+          <span class="file">ingestion/find_videos.py → videos.txt</span></div>
+      </div>
+      <div class="arr"><i></i><b></b></div>
+
+      <div class="card">
+        <div class="num">1</div>
+        <div><h3>Load Transcripts</h3>
+          <p>youtube-transcript-api: captions with start times · cached as JSON · failed videos skipped</p>
+          <span class="file">ingestion/youtube_loader.py → data/transcripts/</span></div>
+      </div>
+      <div class="arr"><i></i><b></b></div>
+
+      <div class="card">
+        <div class="num">2</div>
+        <div><h3>Preprocess</h3>
+          <p>Remove caption noise ([music], ♪, &gt;&gt;) and extra whitespace; keep timestamps. No lowercasing / lemmatization: embeddings work best on natural text</p>
+          <span class="file">ingestion/preprocess.py → data/processed/</span></div>
+      </div>
+      <div class="arr"><i></i><b></b></div>
+
+      <div class="card">
+        <div class="num">3</div>
+        <div><h3>Chunk</h3>
+          <p>~250 words (max 350), end at sentence boundary, 50-word overlap · LangChain Documents with stable IDs <code>videoId_n</code></p>
+          <span class="file">ingestion/chunking.py</span></div>
+      </div>
+      <div class="arr"><i></i><b></b></div>
+
+      <div class="card">
+        <div class="num">4</div>
+        <div><h3>Embeddings</h3>
+          <p>OpenAI text-embedding-3-small · 1536 dimensions · same model for indexing and queries</p>
+          <span class="file">ingestion/embeddings.py</span></div>
+      </div>
+      <div class="arr"><i></i><b></b></div>
+
+      <div class="card">
+        <div class="num">5</div>
+        <div><h3>Store in Pinecone</h3>
+          <p>Serverless index (AWS us-east-1, cosine) · upsert by ID, so re-indexing never duplicates</p>
+          <span class="file">ingestion/vector_store.py</span></div>
+      </div>
+      <div class="arr"><i></i><b></b></div>
+
+      <div class="chips">
+        <h4>Metadata stored with each chunk</h4>
+        <span class="chip">video_id</span><span class="chip">title</span><span class="chip">channel</span><span class="chip">topic</span><span class="chip">url</span><span class="chip">language</span><span class="chip">chunk_index</span><span class="chip">start</span><span class="chip">end</span><span class="chip">timestamp</span><span class="chip">timestamp_url</span><span class="chip">word_count</span>
+      </div>
+    </div>
+
+    <!-- ================= ONLINE ================= -->
+    <div class="panel green">
+      <h2>ONLINE / QUERY TIME</h2>
+      <div class="sub">Runs for every user question · deployed on Vercel</div>
+
+      <div class="row">
+        <div class="card" style="flex:1.25">
+          <div class="icon" style="background:#1b2340">👤</div>
+          <div><h3>User</h3><p>asks a question by <b>text</b> (voice planned) in the browser</p></div>
+        </div>
+        <div class="card dashed">
+          <div class="icon" style="background:#1f8a3b">🎙</div>
+          <div><h3>Speech-to-Text <span class="badge planned">PLANNED</span></h3><p>Whisper voice input</p><span class="file">app/speech.py</span></div>
+        </div>
+      </div>
+      <div class="arr"><i></i><b></b></div>
+
+      <div class="row">
+        <div class="card">
+          <div class="icon" style="background:#149eca">⚛</div>
+          <div><h3>React Web App</h3><p>Vite · chat UI, clickable timestamp citations, tool chips, suggested questions, chat saved in browser</p><span class="file">frontend/src/App.jsx</span></div>
+        </div>
+        <div class="card">
+          <div class="icon" style="background:#05998b">⚡</div>
+          <div><h3>FastAPI Backend</h3><p><code>POST /api/chat</code> · <code>GET /api/videos</code> · <code>GET /api/health</code></p><span class="file">api/index.py → app/app.py</span></div>
+        </div>
+      </div>
+      <div class="arr"><i></i><b></b></div>
+
+      <div class="row">
+        <div class="card" style="flex:1.45">
+          <div class="icon" style="background:#1f8a3b">🤖</div>
+          <div><h3>Video QA Agent (LangChain)</h3>
+            <p>create_agent · <b>gpt-5.4-mini</b> (Responses API, low reasoning) decides which tool(s) to call. System prompt: answer <b>only</b> from video transcripts, always cite timestamps</p>
+            <span class="file">app/agent.py · app/prompts.py</span></div>
+        </div>
+        <div class="card dashed">
+          <div class="icon" style="background:#2f6f3e">🧠</div>
+          <div><h3>Conversation Memory</h3><p>LangGraph checkpointer, one thread per chat, for follow-up questions</p><span class="file">app/memory.py</span></div>
+        </div>
+      </div>
+      <div class="arr"><i></i><b></b></div>
+
+      <div class="tools">
+        <h3>Tool Layer <code>(app/tools.py)</code></h3>
+        <div class="tool-row">
+          <div class="tool"><div class="t-icon">🔍</div><strong>Search Transcripts</strong><code>search_video_transcripts</code><p>semantic search, optionally within one video</p></div>
+          <div class="tool"><div class="t-icon">📋</div><strong>List Videos</strong><code>list_available_videos</code><p>titles, topics, channels, IDs</p></div>
+          <div class="tool"><div class="t-icon">📄</div><strong>Full Transcript</strong><code>get_video_transcript</code><p>for summaries of one video</p></div>
+          <div class="tool"><div class="t-icon">➕</div><strong>Add Videos</strong><code>find_and_add_videos</code><p>on user request · up to 5</p></div>
+        </div>
+        <div class="loop"><b>➕ Add Videos</b> runs the indexing pipeline live: YouTube Data API search → transcripts → preprocess → chunk → embed → Pinecone (in memory, no files: Vercel disk isn't persistent)</div>
+      </div>
+      <div class="arr"><i></i><b></b></div>
+
+      <div class="card">
+        <div class="icon" style="background:#1f8a3b">⏚</div>
+        <div><h3>Retrieval</h3>
+          <p>1. Embed question &nbsp; 2. Pinecone similarity search (top 4) &nbsp; 3. Optional filter by video / topic &nbsp; 4. Drop chunks scoring &lt; 0.25 (measured: on-topic 0.31–0.65, off-topic ≤ 0.18) &nbsp; 5. Return passages with title + timestamp link</p>
+          <span class="file">app/retrieval.py</span></div>
+      </div>
+      <div class="arr"><i></i><b></b></div>
+
+      <div class="center">
+        <div class="card">
+          <div class="icon" style="background:#1f8a3b">🌲</div>
+          <div><h3>Pinecone Vector Database</h3><p>Hosted, shared by the indexing pipeline and the app</p><span class="file">index: yt-video-qa · 1536 dims · cosine</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= SIDE ================= -->
+    <div>
+      <div class="panel purple side">
+        <h2>LANGSMITH</h2>
+        <p style="margin-top:10px"><b>Tracing</b> <span class="badge done">ON</span>: every agent run, tool call, LLM call, latency and tokens (via env vars)</p>
+        <p><b>Eval dataset</b> <span class="badge planned">PLANNED</span>: question / expected answer, incl. off-topic questions</p>
+        <p><b>Evaluators</b>: correctness (LLM judge), grounding (cites a video), refusal of off-topic, latency</p>
+        <span class="file">evaluation/langsmith_eval.py · metrics.py<br>evaluation/eval_questions.csv</span>
+      </div>
+
+      <div class="panel side" style="border-color:#111; margin-top:26px">
+        <h2 style="color:#111">▲ DEPLOYMENT: VERCEL</h2>
+        <p style="margin-top:10px"><b>React</b> static build served at <code style="font-family:var(--mono)">/</code></p>
+        <p><b>FastAPI</b> Python function at <code style="font-family:var(--mono)">/api/*</code> (60 s limit, ~116 MB deps)</p>
+        <p><b>Pinecone</b> + <b>OpenAI</b> + <b>YouTube API</b> are external services</p>
+        <p>API keys in Vercel environment variables (locally: <code style="font-family:var(--mono)">.env</code>)</p>
+        <span class="file">vercel.json · .vercelignore · requirements.txt</span>
+      </div>
+
+      <div class="panel orange side" style="margin-top:26px">
+        <h2>PROJECT STRUCTURE</h2>
+<div class="tree">api/           <span class="c"># Vercel entry point</span>
+app/           <span class="c"># API, agent, tools, retrieval</span>
+ingestion/     <span class="c"># indexing pipeline</span>
+frontend/      <span class="c"># React + Vite chat UI</span>
+evaluation/    <span class="c"># LangSmith evals</span>
+tests/         <span class="c"># pytest (offline + network)</span>
+data/          <span class="c"># local cache (not deployed)</span>
+  transcripts/ <span class="c"># raw transcripts</span>
+  processed/   <span class="c"># cleaned + chunks.jsonl</span>
+docs/ · presentation/ · notebooks/
+videos.txt · vercel.json · .env
+requirements.txt      <span class="c"># runtime</span>
+requirements-dev.txt  <span class="c"># local tools</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= OUTPUT ================= -->
+  <div class="output">
+    <h2>OUTPUT TO USER</h2>
+    <div class="out-row">
+      <div class="card"><div class="icon" style="background:#6a3fc9">≡</div><div><h3>Retrieved Context</h3><p>Top-4 transcript chunks above the relevance threshold, with timestamps</p></div></div>
+      <div class="h-arr"><i></i><b></b></div>
+      <div class="card"><div class="icon" style="background:#6a3fc9">AI</div><div><h3>Grounded Answer</h3><p>LLM answers only from the passages + conversation memory; says so if videos don't cover it</p></div></div>
+      <div class="h-arr"><i></i><b></b></div>
+      <div class="card"><div class="icon" style="background:#6a3fc9">✓</div><div><h3>Answer + Citations</h3><p>[Video title @ m:ss](youtube.com/watch?v=…&amp;t=123s), jumps to the exact moment</p></div></div>
+      <div class="h-arr"><i></i><b></b></div>
+      <div class="card"><div class="icon" style="background:#6a3fc9">▶</div><div><h3>Shown in React Chat</h3><p>Markdown with clickable links, tool chips, response time</p></div></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i style="background:var(--blue)"></i>Indexing flow</span>
+    <span><i style="background:var(--green)"></i>Query flow (online)</span>
+    <span><i style="background:var(--orange)"></i>Agent tools</span>
+    <span><i style="background:var(--purple)"></i>Output / evaluation</span>
+    <span><i class="d"></i>Supporting / planned component</span>
+  </div>
+  <div class="footer">The chatbot answers only from the indexed video transcripts. If no relevant content is found, it says so and offers to find videos instead of guessing.</div>
+</body>
+</html>

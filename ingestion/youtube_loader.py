@@ -12,11 +12,26 @@ From code (e.g. an agent tool, with results from search_youtube):
 import argparse
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 
 from youtube_transcript_api import CouldNotRetrieveTranscript, YouTubeTranscriptApi
+from youtube_transcript_api.proxies import GenericProxyConfig, WebshareProxyConfig
 
-from app.config import TRANSCRIPT_LANGUAGES, TRANSCRIPTS_DIR, VIDEOS_FILE
+from app.config import (
+    SUPADATA_API_KEY,
+    TRANSCRIPT_LANGUAGES,
+    TRANSCRIPT_PROXY_URL,
+    TRANSCRIPTS_DIR,
+    VIDEOS_FILE,
+    WEBSHARE_PROXY_PASSWORD,
+    WEBSHARE_PROXY_USERNAME,
+)
+
+from ingestion.transcript_service import TranscriptServiceError, TranscriptUnavailable, fetch_from_service
+
+# Errors that mean "this video has no usable transcript" (try the next video)
+TRANSCRIPT_ERRORS = (CouldNotRetrieveTranscript, TranscriptUnavailable)
 
 VIDEO_ID_PATTERN = re.compile(r"(?:v=|youtu\.be/|shorts/)([\w-]{11})")
 
@@ -58,24 +73,64 @@ def parse_videos_file(path: Path = VIDEOS_FILE) -> list[dict]:
     return videos
 
 
+@lru_cache(maxsize=1)
+def get_transcript_api() -> YouTubeTranscriptApi:
+    """Transcript client, routed through a proxy if one is configured in .env."""
+    if WEBSHARE_PROXY_USERNAME and WEBSHARE_PROXY_PASSWORD:
+        proxy = WebshareProxyConfig(proxy_username=WEBSHARE_PROXY_USERNAME, proxy_password=WEBSHARE_PROXY_PASSWORD)
+    elif TRANSCRIPT_PROXY_URL:
+        proxy = GenericProxyConfig(http_url=TRANSCRIPT_PROXY_URL, https_url=TRANSCRIPT_PROXY_URL)
+    else:
+        proxy = None
+    return YouTubeTranscriptApi(proxy_config=proxy)
+
+
+def failure_reason(error: Exception) -> str:
+    """Short reason name for a transcript failure, e.g. "NoTranscript" or "IpBlocked"."""
+    return getattr(error, "reason", type(error).__name__)
+
+
+def is_blocked(reason: str) -> bool:
+    """True if a failure reason means YouTube blocked the request (not missing captions)."""
+    return reason in {"RequestBlocked", "IpBlocked"}
+
+
+def _fetch_with_library(video_id: str, languages: list[str]) -> dict:
+    """Fallback: youtube-transcript-api directly (rate-limited by YouTube per IP)."""
+    fetched = get_transcript_api().fetch(video_id, languages=languages)
+    return {
+        "language": fetched.language_code,
+        "is_generated": fetched.is_generated,  # True = auto-generated captions
+        "segments": [{"text": s.text, "start": s.start, "duration": s.duration} for s in fetched.snippets],
+    }
+
+
 def fetch_transcript(video: dict, languages: list[str] = TRANSCRIPT_LANGUAGES) -> dict:
     """Download one video's transcript and return it with the video's metadata.
 
-    Raises CouldNotRetrieveTranscript if captions are disabled, missing, or blocked.
+    Uses the hosted transcript service when SUPADATA_API_KEY is set, and falls
+    back to youtube-transcript-api if the service itself fails.
+    Raises one of TRANSCRIPT_ERRORS if the video has no usable transcript
+    (or YouTube blocks the fallback request).
     """
-    fetched = YouTubeTranscriptApi().fetch(video["id"], languages=languages)
+    fetched = None
+    if SUPADATA_API_KEY:
+        try:
+            fetched = fetch_from_service(video["id"], languages)
+        except TranscriptServiceError as e:
+            print(f"  transcript service failed for {video['id']} ({e}); falling back to youtube-transcript-api")
+    if fetched is None:
+        fetched = _fetch_with_library(video["id"], languages)
+
     return {
         "video_id": video["id"],
         "url": video.get("url") or f"https://www.youtube.com/watch?v={video['id']}",
         "title": video.get("title", ""),
         "channel": video.get("channel", ""),
         "topic": video.get("topic"),
-        "language": fetched.language_code,
-        "is_generated": fetched.is_generated,  # True = auto-generated captions
-        "segments": [
-            {"text": s.text, "start": s.start, "duration": s.duration}
-            for s in fetched.snippets
-        ],
+        "language": fetched["language"],
+        "is_generated": fetched.get("is_generated"),
+        "segments": fetched["segments"],
     }
 
 
@@ -108,10 +163,9 @@ def load_transcripts(videos: list[dict], topic: str | None = None, force: bool =
 
         try:
             transcript = fetch_transcript(video)
-        except CouldNotRetrieveTranscript as e:
-            failed.append({"id": video["id"], "title": video.get("title", ""),
-                           "reason": type(e).__name__})
-            print(f"  FAILED   {video['id']}  {video.get('title', '')}  ({type(e).__name__})")
+        except TRANSCRIPT_ERRORS as e:
+            failed.append({"id": video["id"], "title": video.get("title", ""), "reason": failure_reason(e)})
+            print(f"  FAILED   {video['id']}  {video.get('title', '')}  ({failure_reason(e)})")
             continue
 
         save_transcript(transcript, output_dir)

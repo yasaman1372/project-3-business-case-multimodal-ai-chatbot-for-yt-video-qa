@@ -11,7 +11,7 @@ class FakeStore:
     """Stands in for Pinecone: records the filter and returns fixed results."""
 
     def __init__(self, results):
-        self.results, self.last_filter = results, "not called"
+        self.results, self.last_filter, self.namespace = results, "not called", "not called"
 
     def similarity_search_with_score(self, query, k, filter=None):
         self.last_filter = filter
@@ -28,7 +28,10 @@ def doc(video_id="AAAAAAAAAAA", start=65):
 @pytest.fixture
 def fake_store(monkeypatch):
     store = FakeStore([(doc(), 0.6), (doc(), 0.3), (doc(), 0.1)])
-    monkeypatch.setattr(retrieval, "get_vector_store", lambda: store)
+    def fake_get_vector_store(namespace=None):
+        store.namespace = namespace
+        return store
+    monkeypatch.setattr(retrieval, "get_vector_store", fake_get_vector_store)
     return store
 
 
@@ -40,6 +43,11 @@ def test_search_drops_low_scores(fake_store):
 def test_search_without_filters(fake_store):
     retrieval.search("black holes")
     assert fake_store.last_filter is None
+
+
+def test_search_uses_the_chat_namespace(fake_store):
+    retrieval.search("black holes", namespace="chat-123")
+    assert fake_store.namespace == "chat-123"
 
 
 def test_search_filters_by_video_and_topic(fake_store):

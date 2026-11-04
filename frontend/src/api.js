@@ -13,13 +13,14 @@ async function request(path, options = {}) {
   return data;
 }
 
-export function fetchVideos() {
-  return request("/videos");
-}
-
 export function sendMessage(message, threadId) {
   return request("/chat", {
     method: "POST",
     body: JSON.stringify({ message, thread_id: threadId }),
   });
+}
+
+// Ends a conversation on the server: deletes the videos/embeddings found for it
+export function endChat(threadId) {
+  return request(`/chat/${encodeURIComponent(threadId)}`, { method: "DELETE" });
 }

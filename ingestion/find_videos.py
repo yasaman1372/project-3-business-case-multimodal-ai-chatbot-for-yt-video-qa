@@ -83,12 +83,37 @@ def search_youtube(topic: str, count: int = 10, min_minutes: int = MIN_VIDEO_MIN
             "id": video_id,
             "title": item["snippet"]["title"],
             "channel": item["snippet"]["channelTitle"],
+            "description": item["snippet"].get("description", ""),
             "duration_seconds": duration,
             "url": f"https://www.youtube.com/watch?v={video_id}",
         })
         if len(videos) == count:
             break
     return videos
+
+
+def rank_by_relevance(question: str, videos: list[dict]) -> list[dict]:
+    """Sort videos by how well their title + description match the question (best first).
+
+    Uses one batched embedding call, so it's cheap and needs no transcript downloads.
+    Each returned video gets a "relevance" score (cosine similarity, 0-1).
+    """
+    if len(videos) <= 1:
+        return videos
+    from ingestion.embeddings import get_embeddings  # lazy: the CLI doesn't need OpenAI
+
+    embeddings = get_embeddings()
+    texts = [f"{v['title']}\n{v.get('description', '')[:500]}" for v in videos]
+    video_vectors = embeddings.embed_documents(texts)
+    question_vector = embeddings.embed_query(question)
+
+    def cosine(a, b):
+        dot = sum(x * y for x, y in zip(a, b))
+        norm = (sum(x * x for x in a) ** 0.5) * (sum(y * y for y in b) ** 0.5)
+        return dot / norm if norm else 0.0
+
+    scored = [{**v, "relevance": round(cosine(question_vector, vec), 3)} for v, vec in zip(videos, video_vectors)]
+    return sorted(scored, key=lambda v: v["relevance"], reverse=True)
 
 
 def existing_video_ids(path: Path) -> set[str]:

@@ -1,7 +1,7 @@
-"""Search the indexed video transcripts in Pinecone.
+"""Search video transcripts in Pinecone (one namespace per chat).
 
 Usage:
-    python -m app.retrieval "what is inside a black hole?"
+    python -m app.retrieval "what is inside a black hole?"     # searches the default namespace
 """
 
 import sys
@@ -12,9 +12,9 @@ from app.config import MAX_TRANSCRIPT_WORDS, MIN_RELEVANCE_SCORE, RETRIEVAL_K
 from ingestion.vector_store import get_index, get_vector_store, indexed_video_ids
 
 
-def search(query: str, k: int = RETRIEVAL_K, video_id: str | None = None,
+def search(query: str, namespace: str | None = None, k: int = RETRIEVAL_K, video_id: str | None = None,
            topic: str | None = None, min_score: float = MIN_RELEVANCE_SCORE) -> list[tuple[Document, float]]:
-    """Return the k most relevant chunks as (Document, score), best first.
+    """Return the k most relevant chunks in a namespace as (Document, score), best first.
 
     Optionally restrict to one video or one topic. Chunks scoring below
     min_score are dropped, so off-topic questions return nothing.
@@ -25,14 +25,14 @@ def search(query: str, k: int = RETRIEVAL_K, video_id: str | None = None,
     if topic:
         metadata_filter["topic"] = {"$eq": topic}
 
-    results = get_vector_store().similarity_search_with_score(query, k=k, filter=metadata_filter or None)
+    results = get_vector_store(namespace).similarity_search_with_score(query, k=k, filter=metadata_filter or None)
     return [(doc, score) for doc, score in results if score >= min_score]
 
 
 def format_results(results: list[tuple[Document, float]]) -> str:
     """Format search results as numbered passages the LLM can read and cite."""
     if not results:
-        return "No relevant passages found in the indexed videos."
+        return "No relevant passages found in the videos of this chat."
 
     passages = []
     for i, (doc, score) in enumerate(results, start=1):
@@ -46,14 +46,14 @@ def format_results(results: list[tuple[Document, float]]) -> str:
     return "\n\n".join(passages)
 
 
-def list_videos() -> list[dict]:
-    """Return {video_id, title, topic, channel, url} for every indexed video."""
-    video_ids = sorted(indexed_video_ids())
+def list_videos(namespace: str | None = None) -> list[dict]:
+    """Return {video_id, title, topic, channel, url} for every video in a namespace."""
+    video_ids = sorted(indexed_video_ids(namespace))
     if not video_ids:
         return []
 
     # The first chunk of each video carries the video's metadata
-    response = get_index().fetch(ids=[f"{vid}_0" for vid in video_ids])
+    response = get_index().fetch(ids=[f"{vid}_0" for vid in video_ids], namespace=namespace or "")
     videos = []
     for vid in video_ids:
         vector = response.vectors.get(f"{vid}_0")
@@ -68,14 +68,15 @@ def list_videos() -> list[dict]:
     return videos
 
 
-def get_video_text(video_id: str, max_words: int = MAX_TRANSCRIPT_WORDS) -> str | None:
-    """Return a video's full transcript (rebuilt from its chunks), or None if not indexed."""
+def get_video_text(video_id: str, namespace: str | None = None,
+                   max_words: int = MAX_TRANSCRIPT_WORDS) -> str | None:
+    """Return a video's full transcript (rebuilt from its chunks), or None if not in the namespace."""
     index = get_index()
-    chunk_ids = [cid for ids in index.list(prefix=f"{video_id}_") for cid in ids]
+    chunk_ids = [cid for ids in index.list(prefix=f"{video_id}_", namespace=namespace or "") for cid in ids]
     if not chunk_ids:
         return None
 
-    vectors = index.fetch(ids=chunk_ids).vectors
+    vectors = index.fetch(ids=chunk_ids, namespace=namespace or "").vectors
     chunks = sorted((v.metadata for v in vectors.values()), key=lambda m: m["chunk_index"])
     # Chunks overlap by design; that's harmless for summaries
     words = " ".join(m["text"] for m in chunks).split()

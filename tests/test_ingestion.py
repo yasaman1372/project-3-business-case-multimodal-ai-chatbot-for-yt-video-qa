@@ -260,8 +260,9 @@ from ingestion import build_index
 def test_index_videos_skips_indexed_and_reports_failures(monkeypatch):
     stored = []
     monkeypatch.setattr(build_index, "ensure_index", lambda: None)
-    monkeypatch.setattr(build_index, "indexed_video_ids", lambda: {"OLDOLDOLDOL"})
-    monkeypatch.setattr(build_index, "add_documents", lambda docs: stored.extend(docs) or len(docs))
+    monkeypatch.setattr(build_index, "indexed_video_ids", lambda namespace=None: {"OLDOLDOLDOL"})
+    monkeypatch.setattr(build_index, "add_documents",
+                        lambda docs, namespace=None: stored.extend(docs) or len(docs))
 
     def fake_fetch(video):
         if video["id"] == "BADBADBADBA":
@@ -300,3 +301,56 @@ def test_embedding_dimensions_match_config():
     from ingestion.embeddings import get_embeddings
 
     assert len(get_embeddings().embed_query("black holes")) == EMBEDDING_DIMENSIONS
+
+
+def test_index_videos_keeps_first_n_working_transcripts(monkeypatch):
+    stored = []
+    monkeypatch.setattr(build_index, "ensure_index", lambda: None)
+    monkeypatch.setattr(build_index, "indexed_video_ids", lambda namespace=None: set())
+    monkeypatch.setattr(build_index, "add_documents", lambda docs, namespace=None: stored.extend(docs) or len(docs))
+
+    def fake_fetch(video):
+        if video["id"].startswith("BAD"):
+            raise TranscriptsDisabled(video["id"])
+        return {**make_transcript(20), "video_id": video["id"]}
+
+    monkeypatch.setattr(build_index, "fetch_transcript", fake_fetch)
+    videos = [{"id": i} for i in ["BADBADBADB1", "GOODGOODGO1", "BADBADBADB2", "GOODGOODGO2", "GOODGOODGO3"]]
+
+    result = build_index.index_videos(videos, save_files=False, namespace="chat-x", max_videos=2)
+
+    assert result["indexed"] == ["GOODGOODGO1", "GOODGOODGO2"]  # search order kept, bad ones skipped
+
+
+def test_index_videos_only_downloads_what_it_needs(monkeypatch):
+    fetched = []
+    monkeypatch.setattr(build_index, "ensure_index", lambda: None)
+    monkeypatch.setattr(build_index, "indexed_video_ids", lambda namespace=None: set())
+    monkeypatch.setattr(build_index, "add_documents", lambda docs, namespace=None: len(docs))
+    monkeypatch.setattr(build_index, "fetch_transcript",
+                        lambda video: fetched.append(video["id"]) or {**make_transcript(20), "video_id": video["id"]})
+
+    videos = [{"id": f"VIDEO{i:06d}"} for i in range(8)]
+    build_index.index_videos(videos, save_files=False, namespace="chat-x", max_videos=3)
+
+    assert sorted(fetched) == ["VIDEO000000", "VIDEO000001", "VIDEO000002"]  # top 3 only
+
+
+def test_rank_by_relevance_puts_best_match_first(monkeypatch):
+    from ingestion import embeddings, find_videos
+
+    class FakeEmbeddings:
+        # 2-d vectors: x = "about Rome", y = "about cooking"
+        def embed_documents(self, texts):
+            return [[1.0, 0.0] if "Rome" in t else [0.0, 1.0] for t in texts]
+
+        def embed_query(self, text):
+            return [0.9, 0.1]
+
+    monkeypatch.setattr(embeddings, "get_embeddings", lambda: FakeEmbeddings())
+    videos = [{"id": "1", "title": "Pasta night"}, {"id": "2", "title": "Fall of Rome", "description": "history"}]
+
+    ranked = find_videos.rank_by_relevance("Why did Rome fall?", videos)
+
+    assert [v["id"] for v in ranked] == ["2", "1"]
+    assert ranked[0]["relevance"] > ranked[1]["relevance"]

@@ -25,6 +25,14 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "yt-video-qa")
+# Hosted transcript service (preferred): fetches YouTube captions from its own servers,
+# so YouTube's IP rate limits don't affect us. https://supadata.ai
+SUPADATA_API_KEY = os.getenv("SUPADATA_API_KEY")
+# Optional proxy for transcript downloads. YouTube blocks transcript requests from IPs
+# that send many of them, and from most cloud servers (e.g. Vercel). Set either:
+WEBSHARE_PROXY_USERNAME = os.getenv("WEBSHARE_PROXY_USERNAME")  # Webshare "residential" proxy
+WEBSHARE_PROXY_PASSWORD = os.getenv("WEBSHARE_PROXY_PASSWORD")
+TRANSCRIPT_PROXY_URL = os.getenv("TRANSCRIPT_PROXY_URL")        # or any http(s) proxy URL
 PINECONE_CLOUD = "aws"
 PINECONE_REGION = "us-east-1"  # the free Starter plan only supports aws/us-east-1
 
@@ -50,5 +58,10 @@ MIN_RELEVANCE_SCORE = 0.25   # drop chunks less similar than this (cosine, 0-1);
                              # on-topic questions 0.31-0.65, off-topic <= 0.18
 MAX_TRANSCRIPT_WORDS = 6000  # cap for the full-transcript tool (summaries)
 
-# --- Agent tools ---
-MAX_VIDEOS_PER_REQUEST = 5   # videos the agent may add per request (latency + quota)
+# --- On-demand video search (per chat) ---
+VIDEOS_PER_TOPIC = 3         # videos fetched and embedded when a chat needs a new topic
+CANDIDATES_PER_TOPIC = 8     # YouTube results ranked by relevance to the question;
+                             # only the best VIDEOS_PER_TOPIC are downloaded and embedded
+ON_DEMAND_MIN_MINUTES = 4    # shorter videos rarely explain much
+ON_DEMAND_MAX_MINUTES = 25   # longer videos make the first answer slow to embed
+CHAT_INDEX_TTL_HOURS = 24    # chat namespaces older than this are deleted automatically
