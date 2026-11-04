@@ -250,3 +250,53 @@ def test_last_chunk_never_exceeds_max_even_with_short_tail():
     chunks = chunk_transcript(make_transcript(66, sentence_every=1000), target_words=250, max_words=350)
     assert all(c.metadata["word_count"] <= 350 for c in chunks)
     assert chunks[-1].metadata["word_count"] >= 250
+
+
+# --- build_index (Pinecone and YouTube replaced with fakes) ---
+
+from ingestion import build_index
+
+
+def test_index_videos_skips_indexed_and_reports_failures(monkeypatch):
+    stored = []
+    monkeypatch.setattr(build_index, "ensure_index", lambda: None)
+    monkeypatch.setattr(build_index, "indexed_video_ids", lambda: {"OLDOLDOLDOL"})
+    monkeypatch.setattr(build_index, "add_documents", lambda docs: stored.extend(docs) or len(docs))
+
+    def fake_fetch(video):
+        if video["id"] == "BADBADBADBA":
+            raise TranscriptsDisabled(video["id"])
+        return {**make_transcript(100), "video_id": video["id"], "topic": video.get("topic")}
+
+    monkeypatch.setattr(build_index, "fetch_transcript", fake_fetch)
+
+    videos = [{"id": "OLDOLDOLDOL"}, {"id": "NEWNEWNEWNE"}, {"id": "BADBADBADBA"}]
+    result = build_index.index_videos(videos, topic="space", save_files=False)
+
+    assert result["indexed"] == ["NEWNEWNEWNE"]
+    assert result["skipped"] == ["OLDOLDOLDOL"]
+    assert [f["id"] for f in result["failed"]] == ["BADBADBADBA"]
+    assert result["chunks"] == len(stored) > 0
+    assert all(d.id.startswith("NEWNEWNEWNE_") and d.metadata["topic"] == "space" for d in stored)
+
+
+def test_missing_api_keys_give_clear_errors(monkeypatch):
+    from ingestion import embeddings, vector_store
+
+    monkeypatch.setattr(embeddings, "OPENAI_API_KEY", None)
+    monkeypatch.setattr(vector_store, "PINECONE_API_KEY", None)
+    embeddings.get_embeddings.cache_clear()
+    vector_store.get_pinecone.cache_clear()
+
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        embeddings.get_embeddings()
+    with pytest.raises(RuntimeError, match="PINECONE_API_KEY"):
+        vector_store.get_pinecone()
+
+
+@pytest.mark.skipif("not config.getoption('--run-network')", reason="needs --run-network")
+def test_embedding_dimensions_match_config():
+    from app.config import EMBEDDING_DIMENSIONS
+    from ingestion.embeddings import get_embeddings
+
+    assert len(get_embeddings().embed_query("black holes")) == EMBEDDING_DIMENSIONS
