@@ -56,3 +56,46 @@ def test_agent_does_not_add_videos_without_asking():
     thread = str(uuid.uuid4())
     ask("What is the best pasta recipe?", thread)
     assert "find_and_add_videos" not in tool_calls(thread)
+
+
+# --- FastAPI endpoints (agent and Pinecone replaced with fakes) ---
+
+from fastapi.testclient import TestClient
+
+from app import app as app_module
+
+
+@pytest.fixture
+def client(monkeypatch):
+    monkeypatch.setattr(app_module, "chat", lambda q, t: {"answer": f"echo: {q}", "tools_used": ["x"]})
+    monkeypatch.setattr(app_module, "list_videos", lambda: [
+        {"video_id": "AAAAAAAAAAA", "title": "T", "topic": "space", "channel": "", "url": "u"}])
+    return TestClient(app_module.app)
+
+
+def test_health(client):
+    assert client.get("/api/health").json()["status"] == "ok"
+
+
+def test_videos(client):
+    assert client.get("/api/videos").json()[0]["video_id"] == "AAAAAAAAAAA"
+
+
+def test_chat_creates_and_keeps_thread_id(client):
+    first = client.post("/api/chat", json={"message": "hi"}).json()
+    assert first["answer"] == "echo: hi" and first["thread_id"]
+
+    second = client.post("/api/chat", json={"message": "again", "thread_id": first["thread_id"]}).json()
+    assert second["thread_id"] == first["thread_id"]
+
+
+def test_chat_rejects_empty_message(client):
+    assert client.post("/api/chat", json={"message": ""}).status_code == 422
+
+
+def test_chat_returns_500_when_agent_fails(client, monkeypatch):
+    def boom(q, t):
+        raise RuntimeError("model down")
+    monkeypatch.setattr(app_module, "chat", boom)
+    response = client.post("/api/chat", json={"message": "hi"})
+    assert response.status_code == 500 and "model down" in response.json()["detail"]

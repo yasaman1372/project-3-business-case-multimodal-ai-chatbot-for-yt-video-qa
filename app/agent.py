@@ -12,6 +12,7 @@ import uuid
 from functools import lru_cache
 
 from langchain.agents import create_agent
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 
 from app.config import CHAT_MODEL, OPENAI_API_KEY, REASONING_EFFORT
@@ -36,16 +37,29 @@ def get_agent():
     )
 
 
-def ask(question: str, thread_id: str) -> str:
-    """Send a question in a conversation and return the agent's answer.
+def chat(question: str, thread_id: str) -> dict:
+    """Send a question in a conversation; return {"answer", "tools_used"}.
 
     Messages with the same thread_id share memory (one thread = one conversation).
+    tools_used lists the tools called for this question, in order.
     """
     result = get_agent().invoke(
         {"messages": [{"role": "user", "content": question}]},
         config={"configurable": {"thread_id": thread_id}},
     )
-    return result["messages"][-1].text
+    messages = result["messages"]
+
+    # Only look at messages produced for this question (after the last user message)
+    last_user = max(i for i, m in enumerate(messages) if isinstance(m, HumanMessage))
+    tools_used = [call["name"] for m in messages[last_user:] if isinstance(m, AIMessage)
+                  for call in m.tool_calls]
+
+    return {"answer": messages[-1].text, "tools_used": tools_used}
+
+
+def ask(question: str, thread_id: str) -> str:
+    """Send a question in a conversation and return just the answer text."""
+    return chat(question, thread_id)["answer"]
 
 
 def main() -> None:

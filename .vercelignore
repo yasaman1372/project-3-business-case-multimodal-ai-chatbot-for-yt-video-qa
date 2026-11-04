@@ -1,0 +1,14 @@
+# Not needed on Vercel (keeps uploads small)
+.venv/
+.env
+data/
+notebooks/
+tests/
+evaluation/
+presentation/
+docs/
+Claude outputs/
+frontend/node_modules/
+frontend/dist/
+**/__pycache__/
+.pytest_cache/
