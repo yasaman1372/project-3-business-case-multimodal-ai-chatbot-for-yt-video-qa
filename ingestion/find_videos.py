@@ -9,8 +9,9 @@ Usage:
     python -m ingestion.find_videos "black holes" --captions-only
 
 From code (e.g. an agent tool):
-    from ingestion.find_videos import search_youtube
+    from ingestion.find_videos import get_video_details, search_youtube
     videos = search_youtube("black holes", count=5)
+    details = get_video_details(["O6_u_SMHtgo"])   # title, channel, length, ...
 """
 
 import argparse
@@ -45,6 +46,29 @@ def _duration_seconds(iso_duration: str) -> int:
     return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
 
+def get_video_details(video_ids: list[str]) -> list[dict]:
+    """Title, channel, publish date, length and description for up to 50 videos (1 quota unit).
+
+    Unknown or private videos are left out.
+    """
+    if not video_ids:
+        return []
+    response = _api_get("videos", {"part": "snippet,contentDetails", "id": ",".join(video_ids[:50])})
+    videos = []
+    for item in response.get("items", []):
+        snippet = item["snippet"]
+        videos.append({
+            "id": item["id"],
+            "title": snippet["title"],
+            "channel": snippet["channelTitle"],
+            "published": snippet["publishedAt"][:10],  # YYYY-MM-DD
+            "description": snippet.get("description", ""),
+            "duration_seconds": _duration_seconds(item["contentDetails"]["duration"]),
+            "url": f"https://www.youtube.com/watch?v={item['id']}",
+        })
+    return videos
+
+
 def search_youtube(topic: str, count: int = 10, min_minutes: int = MIN_VIDEO_MINUTES,
                    max_minutes: int = MAX_VIDEO_MINUTES,
                    skip_ids: set[str] = frozenset(), captions_only: bool = False,
@@ -68,25 +92,14 @@ def search_youtube(topic: str, count: int = 10, min_minutes: int = MIN_VIDEO_MIN
         return []
 
     # Search results don't include duration, so look it up (costs 1 quota unit)
-    details = _api_get("videos", {"part": "snippet,contentDetails", "id": ",".join(ids)})
-    by_id = {item["id"]: item for item in details.get("items", [])}
+    by_id = {video["id"]: video for video in get_video_details(ids)}
 
     videos = []
     for video_id in ids:  # keep search relevance order
-        item = by_id.get(video_id)
-        if not item:
+        video = by_id.get(video_id)
+        if not video or not (min_minutes * 60 <= video["duration_seconds"] <= max_minutes * 60):
             continue
-        duration = _duration_seconds(item["contentDetails"]["duration"])
-        if not (min_minutes * 60 <= duration <= max_minutes * 60):
-            continue
-        videos.append({
-            "id": video_id,
-            "title": item["snippet"]["title"],
-            "channel": item["snippet"]["channelTitle"],
-            "description": item["snippet"].get("description", ""),
-            "duration_seconds": duration,
-            "url": f"https://www.youtube.com/watch?v={video_id}",
-        })
+        videos.append(video)
         if len(videos) == count:
             break
     return videos

@@ -6,16 +6,24 @@ import Illustration from "./Illustration.jsx";
 const TOOL_LABELS = {
   search_video_transcripts: { icon: "🔍", label: "Searched transcripts" },
   find_videos_on_topic: { icon: "🎬", label: "Found videos on YouTube" },
+  add_video_by_url: { icon: "🔗", label: "Read the linked video" },
   list_videos_in_this_chat: { icon: "📚", label: "Listed chat videos" },
   get_video_transcript: { icon: "📄", label: "Read full transcript" },
 };
 
 // One question per subject. The first question on a topic finds videos on YouTube.
+// `message` (if set) is what gets sent; the last one shows reading a linked video (it is in
+// the shared cache, so it costs no transcript credits).
 const SUGGESTIONS = [
   { icon: "🕳️", title: "What is inside a black hole?", hint: "Space · Astrophysics" },
   { icon: "🎨", title: "Why is Van Gogh's The Starry Night so famous?", hint: "Art · Painting" },
   { icon: "🏛️", title: "Why did the Roman Empire fall?", hint: "History · Ancient Rome" },
-  { icon: "🏃", title: "What's the science behind running faster?", hint: "Sport · Sprinting" },
+  {
+    icon: "🔗",
+    title: "Summarise a video from its link",
+    hint: "Paste any YouTube link",
+    message: "Summarise this video: https://youtu.be/wro_8xHn8Yc",
+  },
 ];
 
 // Progress messages while waiting: [seconds after sending, text]
@@ -353,8 +361,8 @@ export default function App() {
               <span className="gradient-text">Jump to the exact moment.</span>
             </h2>
             <p>
-              Ask about any topic. I find YouTube videos on it, read their transcripts, and answer
-              with links that open each video at the second it's explained.
+              Ask about any topic, or paste a YouTube link. I find the videos, read their
+              transcripts, and answer with links that open each video at the second it's explained.
             </p>
             <div className="suggestions">
               {SUGGESTIONS.map((s, i) => (
@@ -362,7 +370,7 @@ export default function App() {
                   key={s.title}
                   className="suggestion"
                   style={{ animationDelay: `${150 + i * 80}ms` }}
-                  onClick={() => send(s.title)}
+                  onClick={() => send(s.message || s.title)}
                 >
                   <span className="suggestion-icon">{s.icon}</span>
                   <span>
@@ -443,7 +451,7 @@ export default function App() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about any topic…"
+            placeholder="Ask about any topic, or paste a YouTube link…"
             rows={1}
             maxLength={2000}
             disabled={loading}

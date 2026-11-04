@@ -63,6 +63,10 @@ MIN_RELEVANCE_SCORE = 0.25   # drop chunks less similar than this (cosine, 0-1);
                              # on-topic questions 0.31-0.65, off-topic <= 0.18
 MAX_TRANSCRIPT_WORDS = 6000  # cap for the full-transcript tool (summaries)
 
+# --- Evaluation (evaluation/langsmith_eval.py) ---
+EVAL_DATASET_NAME = "yt-video-qa-eval"  # LangSmith dataset built from evaluation/eval_questions.csv
+EVAL_JUDGE_MODEL = "gpt-5.4-mini"       # LLM that grades correctness and groundedness
+
 # --- On-demand video search (per chat) ---
 VIDEOS_PER_TOPIC = 3         # videos fetched and embedded when a chat needs a new topic
 CANDIDATES_PER_TOPIC = 8     # YouTube results ranked by relevance to the question;
@@ -70,6 +74,7 @@ CANDIDATES_PER_TOPIC = 8     # YouTube results ranked by relevance to the questi
 ON_DEMAND_MIN_MINUTES = 4    # shorter videos rarely explain much
 ON_DEMAND_MAX_MINUTES = 25   # longer videos make the first answer slow to embed
 CHAT_INDEX_TTL_HOURS = 24    # chat namespaces older than this are deleted automatically
+MAX_LINKED_VIDEO_MINUTES = 90  # longest video a user can add by pasting its link
 
 # --- Shared video cache ---
 # Every video a chat reads is also kept (already embedded) in one shared namespace, so

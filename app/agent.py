@@ -12,7 +12,7 @@ import uuid
 from functools import lru_cache
 
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
 from app.config import CHAT_MODEL, OPENAI_API_KEY, REASONING_EFFORT
@@ -37,12 +37,9 @@ def get_agent():
     )
 
 
-def chat(question: str, thread_id: str) -> dict:
-    """Send a question in a conversation; return {"answer", "tools_used"}.
-
-    Messages with the same thread_id share memory (one thread = one conversation).
-    tools_used lists the tools called for this question, in order.
-    """
+def chat_with_details(question: str, thread_id: str) -> dict:
+    """Like chat(), plus "tool_outputs": [{"tool", "content"}] with what each tool returned
+    for this question (used by the evaluation to check answers against the retrieved passages)."""
     result = get_agent().invoke(
         {"messages": [{"role": "user", "content": question}]},
         config={"configurable": {"thread_id": thread_id}},
@@ -51,10 +48,21 @@ def chat(question: str, thread_id: str) -> dict:
 
     # Only look at messages produced for this question (after the last user message)
     last_user = max(i for i, m in enumerate(messages) if isinstance(m, HumanMessage))
-    tools_used = [call["name"] for m in messages[last_user:] if isinstance(m, AIMessage)
-                  for call in m.tool_calls]
+    new_messages = messages[last_user:]
+    tools_used = [call["name"] for m in new_messages if isinstance(m, AIMessage) for call in m.tool_calls]
+    tool_outputs = [{"tool": m.name, "content": m.text} for m in new_messages if isinstance(m, ToolMessage)]
 
-    return {"answer": messages[-1].text, "tools_used": tools_used}
+    return {"answer": messages[-1].text, "tools_used": tools_used, "tool_outputs": tool_outputs}
+
+
+def chat(question: str, thread_id: str) -> dict:
+    """Send a question in a conversation; return {"answer", "tools_used"}.
+
+    Messages with the same thread_id share memory (one thread = one conversation).
+    tools_used lists the tools called for this question, in order.
+    """
+    result = chat_with_details(question, thread_id)
+    return {"answer": result["answer"], "tools_used": result["tools_used"]}
 
 
 def ask(question: str, thread_id: str) -> str:

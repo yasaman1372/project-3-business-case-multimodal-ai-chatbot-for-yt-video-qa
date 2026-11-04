@@ -17,7 +17,7 @@ def no_ranking(monkeypatch):
 
 def test_all_tools_have_descriptions_and_hide_config():
     names = {t.name for t in TOOLS}
-    assert names == {"search_video_transcripts", "find_videos_on_topic",
+    assert names == {"search_video_transcripts", "find_videos_on_topic", "add_video_by_url",
                      "list_videos_in_this_chat", "get_video_transcript"}
     assert all(len(t.description) > 30 for t in TOOLS)
     # The chat id is injected by LangChain, never chosen by the LLM
@@ -66,6 +66,59 @@ def test_get_video_transcript_unknown_video(monkeypatch):
     monkeypatch.setattr(tools, "get_video_text", lambda video_id, namespace: None)
     result = tools.get_video_transcript.invoke({"video_id": "XXXXXXXXXXX"}, config=CONFIG)
     assert "not in this chat" in result
+
+
+# --- add_video_by_url (YouTube and Pinecone replaced with fakes) ---
+
+PICASSO = {"id": "O6_u_SMHtgo", "title": "A Short Biography of Pablo Picasso", "channel": "Art Ch",
+           "published": "2023-09-07", "description": "Life of Picasso.", "duration_seconds": 489,
+           "url": "https://www.youtube.com/watch?v=O6_u_SMHtgo"}
+
+
+@pytest.fixture
+def linked_video(monkeypatch):
+    """Fake YouTube details and indexing; returns the kwargs index_videos was called with."""
+    calls = {}
+    monkeypatch.setattr(tools, "indexed_video_ids", lambda ns: set())
+    monkeypatch.setattr(tools, "prune_old_chat_namespaces", lambda: None)
+    monkeypatch.setattr(tools, "limit_video_cache", lambda: None)
+    monkeypatch.setattr(tools, "fetch_video_details", lambda ids: [v for v in [PICASSO] if v["id"] in ids])
+    monkeypatch.setattr(tools, "index_videos", lambda videos, **kw: calls.update(kw, videos=videos) or {
+        "indexed": [videos[0]["id"]], "failed": [], "skipped": [], "chunks": 4})
+    return calls
+
+
+@pytest.mark.parametrize("url", ["https://www.youtube.com/watch?v=O6_u_SMHtgo&t=30s",
+                                 "https://youtu.be/O6_u_SMHtgo", "O6_u_SMHtgo"])
+def test_add_video_by_url_reads_the_linked_video(linked_video, url):
+    result = tools.add_video_by_url.invoke({"url": url}, config=CONFIG)
+
+    assert "Added 'A Short Biography of Pablo Picasso'" in result and "video_id: O6_u_SMHtgo" in result
+    assert linked_video["namespace"] == "chat-1700000000-abc"
+    assert [v["id"] for v in linked_video["videos"]] == ["O6_u_SMHtgo"]
+
+
+def test_add_video_by_url_rejects_non_youtube_links(linked_video):
+    assert "not a YouTube video link" in tools.add_video_by_url.invoke({"url": "https://vimeo.com/123"}, config=CONFIG)
+    assert linked_video == {}
+
+
+def test_add_video_by_url_explains_problems(linked_video, monkeypatch):
+    assert "not found on YouTube" in tools.add_video_by_url.invoke({"url": "https://youtu.be/XXXXXXXXXXX"}, config=CONFIG)
+
+    monkeypatch.setattr(tools, "fetch_video_details", lambda ids: [{**PICASSO, "duration_seconds": 3 * 3600}])
+    assert "can't be added" in tools.add_video_by_url.invoke({"url": "O6_u_SMHtgo"}, config=CONFIG)
+
+    monkeypatch.setattr(tools, "fetch_video_details", lambda ids: [PICASSO])
+    monkeypatch.setattr(tools, "index_videos", lambda videos, **kw: {
+        "indexed": [], "failed": [{"id": "O6_u_SMHtgo", "reason": "IpBlocked"}], "skipped": [], "chunks": 0})
+    assert tools.add_video_by_url.invoke({"url": "O6_u_SMHtgo"}, config=CONFIG).startswith("YOUTUBE_BLOCKED")
+
+
+def test_add_video_by_url_skips_videos_already_in_chat(linked_video, monkeypatch):
+    monkeypatch.setattr(tools, "indexed_video_ids", lambda ns: {"O6_u_SMHtgo"})
+    assert "already in this chat" in tools.add_video_by_url.invoke({"url": "O6_u_SMHtgo"}, config=CONFIG)
+    assert linked_video == {}
 
 
 # --- real agent (calls OpenAI, YouTube + Pinecone; skipped by default) ---
