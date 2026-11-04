@@ -29,7 +29,12 @@ const LOADING_STAGES = [
 
 const STORAGE_KEY = "yt-qa-chat";
 
-// Spoken questions: recorded with the microphone or uploaded as an audio/video file
+// Spoken questions. The 🎤 button uses the browser's own speech recognition (Chrome, Edge,
+// Safari), so words appear while the user speaks. Browsers without it (Firefox) record the
+// question instead and the server turns it into text. 📎 uploads an audio/video file.
+const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+const SPEECH_LANGUAGE = "en-US"; // the videos are in English (TRANSCRIPT_LANGUAGES on the server)
+const MIC_BLOCKED = "Microphone access was blocked. Allow it in your browser to ask by voice.";
 const MAX_RECORDING_SECONDS = 120;
 const MAX_UPLOAD_MB = 4; // must match MAX_AUDIO_MB on the server (Vercel caps uploads at 4.5 MB)
 const UPLOAD_TYPES = ".flac,.m4a,.mp3,.mp4,.mpeg,.mpga,.oga,.ogg,.wav,.webm";
@@ -129,15 +134,17 @@ export default function App() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState(0);
-  // Voice input: "idle" | "recording" | "transcribing"
+  // Voice input: "idle" | "listening" (live) | "recording" | "transcribing"
   const [voice, setVoice] = useState("idle");
-  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [voiceSeconds, setVoiceSeconds] = useState(0);
   const [voiceError, setVoiceError] = useState(null);
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const recorderRef = useRef(null);
-  const recordingTimersRef = useRef([]);
+  const recognitionRef = useRef(null);
+  const liveFailedRef = useRef(false); // live recognition failed once: record instead
+  const voiceTimersRef = useRef([]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ threadId, messages }));
@@ -201,13 +208,76 @@ export default function App() {
     }
   }
 
-  async function startRecording() {
+  // Count the seconds and stop automatically at the limit
+  function startVoiceTimers() {
+    setVoiceSeconds(0);
+    voiceTimersRef.current = [
+      setInterval(() => setVoiceSeconds((s) => s + 1), 1000),
+      setTimeout(stopVoice, MAX_RECORDING_SECONDS * 1000),
+    ];
+  }
+
+  function clearVoiceTimers() {
+    voiceTimersRef.current.forEach(clearTimeout);
+  }
+
+  function startVoice() {
     setVoiceError(null);
+    if (SpeechRecognitionAPI && !liveFailedRef.current) startListening();
+    else startRecording();
+  }
+
+  function stopVoice() {
+    recognitionRef.current?.stop();
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+  }
+
+  // Live: the message box fills in while the user speaks
+  function startListening() {
+    const recognition = new SpeechRecognitionAPI();
+    recognition.lang = SPEECH_LANGUAGE;
+    recognition.continuous = true; // keep listening through pauses until stopped
+    recognition.interimResults = true; // show words before the sentence is finished
+    const typed = input.trim(); // keep anything already typed
+
+    recognition.onresult = (e) => {
+      const spoken = Array.from(e.results, (result) => result[0].transcript)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      setInput([typed, spoken].filter(Boolean).join(" "));
+    };
+    recognition.onerror = (e) => {
+      if (e.error === "not-allowed") {
+        setVoiceError(MIC_BLOCKED);
+      } else if (e.error === "no-speech") {
+        setVoiceError("I didn't hear anything. Press 🎤 and try again.");
+      } else if (e.error !== "aborted") {
+        // e.g. offline, or speech recognition turned off on the device
+        liveFailedRef.current = true;
+        setVoiceError("Live speech recognition isn't available here. Press 🎤 again to record instead.");
+      }
+    };
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      clearVoiceTimers();
+      setVoice("idle");
+      inputRef.current?.focus();
+    };
+
+    recognition.start();
+    recognitionRef.current = recognition;
+    setVoice("listening");
+    startVoiceTimers();
+  }
+
+  // Fallback: record, then the server turns the recording into text
+  async function startRecording() {
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
-      setVoiceError("Microphone access was blocked. Allow it in your browser to ask by voice.");
+      setVoiceError(MIC_BLOCKED);
       return;
     }
 
@@ -216,22 +286,14 @@ export default function App() {
     recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     recorder.onstop = () => {
       stream.getTracks().forEach((track) => track.stop()); // turn the microphone off
-      recordingTimersRef.current.forEach(clearTimeout);
+      clearVoiceTimers();
       const type = recorder.mimeType || "audio/webm";
       transcribe(new Blob(chunks, { type }), `question.${recordingExtension(type)}`);
     };
     recorder.start();
     recorderRef.current = recorder;
     setVoice("recording");
-    setRecordingSeconds(0);
-    recordingTimersRef.current = [
-      setInterval(() => setRecordingSeconds((s) => s + 1), 1000),
-      setTimeout(stopRecording, MAX_RECORDING_SECONDS * 1000),
-    ];
-  }
-
-  function stopRecording() {
-    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    startVoiceTimers();
   }
 
   function handleFileChosen(e) {
@@ -256,6 +318,7 @@ export default function App() {
   }
 
   const isEmpty = messages.length === 0;
+  const voiceActive = voice === "listening" || voice === "recording";
 
   return (
     <div className="app">
@@ -384,6 +447,7 @@ export default function App() {
             rows={1}
             maxLength={2000}
             disabled={loading}
+            readOnly={voice === "listening"} // filled in by speech recognition
             autoFocus
           />
           <input
@@ -403,16 +467,16 @@ export default function App() {
           >
             <PaperclipIcon />
           </button>
-          {CAN_RECORD && (
+          {(SpeechRecognitionAPI || CAN_RECORD) && (
             <button
               type="button"
-              className={`icon-button ${voice === "recording" ? "recording" : ""}`}
-              onClick={voice === "recording" ? stopRecording : startRecording}
+              className={`icon-button ${voiceActive ? "recording" : ""}`}
+              onClick={voiceActive ? stopVoice : startVoice}
               disabled={loading || voice === "transcribing"}
-              aria-label={voice === "recording" ? "Stop recording" : "Ask by voice"}
-              title={voice === "recording" ? "Stop recording" : "Ask by voice"}
+              aria-label={voiceActive ? "Stop" : "Ask by voice"}
+              title={voiceActive ? "Stop" : "Ask by voice"}
             >
-              {voice === "recording" ? <StopIcon /> : <MicIcon />}
+              {voiceActive ? <StopIcon /> : <MicIcon />}
             </button>
           )}
           <button
@@ -424,10 +488,10 @@ export default function App() {
             <SendIcon />
           </button>
         </form>
-        {voice === "recording" ? (
+        {voiceActive ? (
           <p className="hint voice-status">
-            <span className="rec-dot" /> Recording {formatSeconds(recordingSeconds)} /{" "}
-            {formatSeconds(MAX_RECORDING_SECONDS)} · press ■ when you're done
+            <span className="rec-dot" /> {voice === "listening" ? "Listening" : "Recording"}{" "}
+            {formatSeconds(voiceSeconds)} / {formatSeconds(MAX_RECORDING_SECONDS)} · press ■ when you're done
           </p>
         ) : voice === "transcribing" ? (
           <p className="hint voice-status">Turning your question into text…</p>
