@@ -13,7 +13,7 @@ from app.config import CANDIDATES_PER_TOPIC, ON_DEMAND_MAX_MINUTES, ON_DEMAND_MI
 from app.retrieval import format_results, get_video_text, list_videos, search
 from ingestion.build_index import index_videos
 from ingestion.find_videos import rank_by_relevance, search_youtube
-from ingestion.vector_store import chat_namespace, indexed_video_ids, prune_old_chat_namespaces
+from ingestion.vector_store import chat_namespace, indexed_video_ids, limit_video_cache, prune_old_chat_namespaces
 from ingestion.youtube_loader import is_blocked
 
 
@@ -47,6 +47,7 @@ def find_videos_on_topic(topic: str, question: str, config: RunnableConfig) -> s
     already = indexed_video_ids(namespace)
     if not already:
         prune_old_chat_namespaces()  # first videos of a new chat: clean up abandoned chats
+        limit_video_cache()          # and keep the shared video cache from growing too big
 
     videos = search_youtube(topic, count=CANDIDATES_PER_TOPIC, min_minutes=ON_DEMAND_MIN_MINUTES,
                             max_minutes=ON_DEMAND_MAX_MINUTES, skip_ids=already)

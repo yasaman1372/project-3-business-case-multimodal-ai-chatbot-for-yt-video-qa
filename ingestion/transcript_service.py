@@ -20,6 +20,13 @@ from app.config import SUPADATA_API_KEY, TRANSCRIPT_LANGUAGES
 
 API_URL = "https://api.supadata.ai/v1/transcript"
 JOB_TIMEOUT_SECONDS = 40  # long videos are processed as a job we poll
+RETRY_DELAYS = [1, 2]     # seconds to wait before retrying an HTTP 429 (too many requests)
+LIMITED_PAUSE_SECONDS = 60  # after retries fail, skip the service for this long
+
+# Supadata answers 429 both when we're too fast (free plan: 1 request/second) and when
+# the monthly credits are used up. If retrying doesn't help, assume credits are gone and
+# stop asking for a while, so each video doesn't wait through the retries again.
+_limited_until = 0.0
 
 
 class TranscriptUnavailable(Exception):
@@ -39,6 +46,20 @@ def _request(client: httpx.Client, url: str, params: dict | None = None) -> http
         return client.get(url, params=params, headers={"x-api-key": SUPADATA_API_KEY}, timeout=30)
     except httpx.HTTPError as e:
         raise TranscriptServiceError(f"Could not reach Supadata: {e}") from e
+
+
+def _get(client: httpx.Client, url: str, params: dict | None = None) -> httpx.Response:
+    """_request, waiting and retrying while Supadata answers 429 (too many requests)."""
+    global _limited_until
+    response = _request(client, url, params)
+    for delay in RETRY_DELAYS:
+        if response.status_code != 429:
+            return response
+        time.sleep(delay)
+        response = _request(client, url, params)
+    if response.status_code == 429:
+        _limited_until = time.monotonic() + LIMITED_PAUSE_SECONDS
+    return response
 
 
 def _check(response: httpx.Response) -> dict:
@@ -62,6 +83,8 @@ def fetch_from_service(video_id: str, languages: list[str] = TRANSCRIPT_LANGUAGE
     """
     if not SUPADATA_API_KEY:
         raise TranscriptServiceError("SUPADATA_API_KEY is not set")
+    if time.monotonic() < _limited_until:
+        raise TranscriptServiceError("Supadata rate or credit limit reached; skipping it for now")
 
     params = {
         "url": f"https://www.youtube.com/watch?v={video_id}",
@@ -70,7 +93,7 @@ def fetch_from_service(video_id: str, languages: list[str] = TRANSCRIPT_LANGUAGE
         "text": "false",
     }
     with httpx.Client() as client:
-        data = _check(_request(client, API_URL, params))
+        data = _check(_get(client, API_URL, params))
 
         # Long videos come back as a job to poll
         if "jobId" in data:
@@ -78,7 +101,7 @@ def fetch_from_service(video_id: str, languages: list[str] = TRANSCRIPT_LANGUAGE
             deadline = time.monotonic() + JOB_TIMEOUT_SECONDS
             while True:
                 time.sleep(1)
-                data = _check(_request(client, job_url))
+                data = _check(_get(client, job_url))
                 status = data.get("status")
                 if status == "completed":
                     break

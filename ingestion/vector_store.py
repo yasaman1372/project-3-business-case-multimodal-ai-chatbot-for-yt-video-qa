@@ -7,6 +7,10 @@ found for one conversation never mix with another's. The default namespace
 Chunk IDs look like "<video_id>_<chunk_index>", so all chunks of a video can be
 found by ID prefix, and re-adding a video overwrites its old chunks.
 
+Every video a chat reads is also kept in a shared "video-cache" namespace, so a
+later chat that picks the same video copies its chunks instead of downloading
+and embedding the transcript again.
+
 Usage:
     python -m ingestion.vector_store                                  # index stats per namespace
     python -m ingestion.vector_store "what is inside a black hole?"   # test a search (default namespace)
@@ -16,6 +20,7 @@ import re
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
 from langchain_core.documents import Document
@@ -29,10 +34,14 @@ from app.config import (
     PINECONE_CLOUD,
     PINECONE_INDEX_NAME,
     PINECONE_REGION,
+    VIDEO_CACHE_MAX_CHUNKS,
+    VIDEO_CACHE_NAMESPACE,
 )
 from ingestion.embeddings import get_embeddings
 
 CHAT_NAMESPACE_PREFIX = "chat-"
+UPSERT_BATCH_SIZE = 32  # vectors per upsert request (Pinecone caps a request at 2 MB)
+FETCH_BATCH_SIZE = 100  # IDs per fetch request
 
 
 @lru_cache(maxsize=1)
@@ -109,11 +118,24 @@ def prune_old_chat_namespaces(max_age_hours: float = CHAT_INDEX_TTL_HOURS) -> li
 
 # ---------- Adding / listing ----------
 
-def add_documents(documents: list[Document], namespace: str | None = None) -> int:
-    """Embed and upsert chunk Documents (one batched embedding call). Same IDs are overwritten."""
+def add_documents(documents: list[Document], namespace: str | None = None, also_to: list[str] = ()) -> int:
+    """Embed chunk Documents (one batched embedding call) and upsert them into `namespace`
+    and every namespace in `also_to` (embedded once). Same IDs are overwritten."""
     if not documents:
         return 0
-    get_vector_store(namespace).add_documents(documents, ids=[doc.id for doc in documents])
+    vectors = get_embeddings().embed_documents([doc.page_content for doc in documents])
+    records = [
+        {
+            "id": doc.id,
+            "values": vector,
+            # stored like LangChain does: chunk text under "text"; Pinecone rejects None values
+            "metadata": {**{k: v for k, v in doc.metadata.items() if v is not None}, "text": doc.page_content},
+        }
+        for doc, vector in zip(documents, vectors)
+    ]
+    for target in [namespace, *also_to]:
+        get_index().upsert(vectors=records, namespace=target or "", batch_size=UPSERT_BATCH_SIZE,
+                           show_progress=False)
     return len(documents)
 
 
@@ -134,6 +156,40 @@ def indexed_video_ids(namespace: str | None = None) -> set[str]:
     for ids in get_index().list(namespace=namespace or ""):
         video_ids.update(chunk_id.rsplit("_", 1)[0] for chunk_id in ids)
     return video_ids
+
+
+# ---------- Shared video cache ----------
+
+def cached_video_ids(video_ids: list[str]) -> set[str]:
+    """Which of these videos are already in the shared cache (checked in parallel)."""
+    if not video_ids:
+        return set()
+    with ThreadPoolExecutor(max_workers=len(video_ids)) as pool:
+        found = pool.map(lambda vid: is_video_indexed(vid, VIDEO_CACHE_NAMESPACE), video_ids)
+    return {vid for vid, hit in zip(video_ids, found) if hit}
+
+
+def copy_videos(video_ids: list[str], source: str, target: str) -> int:
+    """Copy the stored chunks (vectors, text, metadata) of videos to another namespace,
+    without downloading or embedding anything again. Returns the number of chunks copied."""
+    index = get_index()
+    ids = [chunk_id for vid in video_ids
+           for page in index.list(prefix=f"{vid}_", namespace=source)
+           for chunk_id in page]
+    for start in range(0, len(ids), FETCH_BATCH_SIZE):
+        fetched = index.fetch(ids=ids[start:start + FETCH_BATCH_SIZE], namespace=source).vectors
+        records = [{"id": v.id, "values": v.values, "metadata": v.metadata} for v in fetched.values()]
+        index.upsert(vectors=records, namespace=target, batch_size=UPSERT_BATCH_SIZE, show_progress=False)
+    return len(ids)
+
+
+def limit_video_cache(max_chunks: int = VIDEO_CACHE_MAX_CHUNKS) -> bool:
+    """Clear the shared cache if it has grown past max_chunks. Returns True if cleared."""
+    info = get_index().describe_index_stats().namespaces.get(VIDEO_CACHE_NAMESPACE)
+    if info and info.vector_count > max_chunks:
+        delete_namespace(VIDEO_CACHE_NAMESPACE)
+        return True
+    return False
 
 
 def main() -> None:

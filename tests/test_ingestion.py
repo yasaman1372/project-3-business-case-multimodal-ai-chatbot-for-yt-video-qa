@@ -257,12 +257,19 @@ def test_last_chunk_never_exceeds_max_even_with_short_tail():
 from ingestion import build_index
 
 
+@pytest.fixture(autouse=True)
+def empty_video_cache(monkeypatch):
+    """No real Pinecone: the shared video cache starts empty."""
+    monkeypatch.setattr(build_index, "cached_video_ids", lambda ids: set())
+    monkeypatch.setattr(build_index, "copy_videos", lambda ids, source, target: 0)
+
+
 def test_index_videos_skips_indexed_and_reports_failures(monkeypatch):
     stored = []
     monkeypatch.setattr(build_index, "ensure_index", lambda: None)
     monkeypatch.setattr(build_index, "indexed_video_ids", lambda namespace=None: {"OLDOLDOLDOL"})
     monkeypatch.setattr(build_index, "add_documents",
-                        lambda docs, namespace=None: stored.extend(docs) or len(docs))
+                        lambda docs, namespace=None, also_to=(): stored.extend(docs) or len(docs))
 
     def fake_fetch(video):
         if video["id"] == "BADBADBADBA":
@@ -307,7 +314,7 @@ def test_index_videos_keeps_first_n_working_transcripts(monkeypatch):
     stored = []
     monkeypatch.setattr(build_index, "ensure_index", lambda: None)
     monkeypatch.setattr(build_index, "indexed_video_ids", lambda namespace=None: set())
-    monkeypatch.setattr(build_index, "add_documents", lambda docs, namespace=None: stored.extend(docs) or len(docs))
+    monkeypatch.setattr(build_index, "add_documents", lambda docs, namespace=None, also_to=(): stored.extend(docs) or len(docs))
 
     def fake_fetch(video):
         if video["id"].startswith("BAD"):
@@ -326,7 +333,7 @@ def test_index_videos_only_downloads_what_it_needs(monkeypatch):
     fetched = []
     monkeypatch.setattr(build_index, "ensure_index", lambda: None)
     monkeypatch.setattr(build_index, "indexed_video_ids", lambda namespace=None: set())
-    monkeypatch.setattr(build_index, "add_documents", lambda docs, namespace=None: len(docs))
+    monkeypatch.setattr(build_index, "add_documents", lambda docs, namespace=None, also_to=(): len(docs))
     monkeypatch.setattr(build_index, "fetch_transcript",
                         lambda video: fetched.append(video["id"]) or {**make_transcript(20), "video_id": video["id"]})
 
@@ -334,6 +341,41 @@ def test_index_videos_only_downloads_what_it_needs(monkeypatch):
     build_index.index_videos(videos, save_files=False, namespace="chat-x", max_videos=3)
 
     assert sorted(fetched) == ["VIDEO000000", "VIDEO000001", "VIDEO000002"]  # top 3 only
+
+
+def test_index_videos_reuses_cached_videos_and_caches_new_ones(monkeypatch):
+    fetched, written, copied = [], {}, {}
+    monkeypatch.setattr(build_index, "ensure_index", lambda: None)
+    monkeypatch.setattr(build_index, "indexed_video_ids", lambda namespace=None: set())
+    monkeypatch.setattr(build_index, "cached_video_ids", lambda ids: {"CACHEDVIDEO"} & set(ids))
+    monkeypatch.setattr(build_index, "copy_videos",
+                        lambda ids, source, target: copied.update(ids=ids, source=source, target=target) or 5)
+    monkeypatch.setattr(build_index, "add_documents",
+                        lambda docs, namespace=None, also_to=(): written.update(ns=namespace, also_to=also_to) or len(docs))
+    monkeypatch.setattr(build_index, "fetch_transcript",
+                        lambda video: fetched.append(video["id"]) or {**make_transcript(20), "video_id": video["id"]})
+
+    videos = [{"id": "NEWVIDEO001"}, {"id": "CACHEDVIDEO"}, {"id": "NEWVIDEO002"}]
+    result = build_index.index_videos(videos, save_files=False, namespace="chat-x", max_videos=2)
+
+    assert result["indexed"] == ["NEWVIDEO001", "CACHEDVIDEO"]
+    assert fetched == ["NEWVIDEO001"]                         # cached video not downloaded
+    assert copied == {"ids": ["CACHEDVIDEO"], "source": "video-cache", "target": "chat-x"}
+    assert written == {"ns": "chat-x", "also_to": ["video-cache"]}  # new video saved to the cache
+
+
+def test_cli_index_does_not_use_video_cache(monkeypatch):
+    written = {}
+    monkeypatch.setattr(build_index, "ensure_index", lambda: None)
+    monkeypatch.setattr(build_index, "indexed_video_ids", lambda namespace=None: set())
+    monkeypatch.setattr(build_index, "cached_video_ids", lambda ids: pytest.fail("cache checked"))
+    monkeypatch.setattr(build_index, "add_documents",
+                        lambda docs, namespace=None, also_to=(): written.update(also_to=also_to) or len(docs))
+    monkeypatch.setattr(build_index, "fetch_transcript", lambda video: {**make_transcript(20), "video_id": video["id"]})
+
+    build_index.index_videos([{"id": "VIDEO000001"}], save_files=False)
+
+    assert written == {"also_to": []}
 
 
 def test_rank_by_relevance_puts_best_match_first(monkeypatch):

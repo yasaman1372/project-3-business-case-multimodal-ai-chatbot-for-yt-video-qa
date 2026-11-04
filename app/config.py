@@ -38,6 +38,7 @@ PINECONE_REGION = "us-east-1"  # the free Starter plan only supports aws/us-east
 
 # --- YouTube ---
 TRANSCRIPT_LANGUAGES = ["en"]  # preferred transcript languages, in order
+SUPADATA_PARALLEL_REQUESTS = 1  # Supadata free plan allows 1 request/second; raise on paid plans
 MIN_VIDEO_MINUTES = 3
 MAX_VIDEO_MINUTES = 40
 
@@ -65,3 +66,10 @@ CANDIDATES_PER_TOPIC = 8     # YouTube results ranked by relevance to the questi
 ON_DEMAND_MIN_MINUTES = 4    # shorter videos rarely explain much
 ON_DEMAND_MAX_MINUTES = 25   # longer videos make the first answer slow to embed
 CHAT_INDEX_TTL_HOURS = 24    # chat namespaces older than this are deleted automatically
+
+# --- Shared video cache ---
+# Every video a chat reads is also kept (already embedded) in one shared namespace, so
+# later chats reuse it: no transcript download (no Supadata credit) and no embedding cost.
+VIDEO_CACHE_NAMESPACE = "video-cache"
+VIDEO_CACHE_MAX_CHUNKS = 20_000  # ~1,300 videos, ~160 MB of the free plan's 2 GB;
+                                 # the cache is cleared when it grows past this

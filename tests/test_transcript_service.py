@@ -20,6 +20,7 @@ def fake_api(monkeypatch):
     """Replace HTTP calls with a queue of (status, json) responses."""
     monkeypatch.setattr(transcript_service, "SUPADATA_API_KEY", "test-key")
     monkeypatch.setattr(transcript_service.time, "sleep", lambda s: None)
+    monkeypatch.setattr(transcript_service, "_limited_until", 0.0)
     responses, calls = [], []
 
     def fake_request(client, url, params=None):
@@ -69,12 +70,33 @@ def test_wrong_language_is_unavailable(fake_api):
         fetch_from_service("O6_u_SMHtgo")
 
 
-@pytest.mark.parametrize("status", [401, 429, 500])
+@pytest.mark.parametrize("status", [401, 500])
 def test_service_problems_are_service_errors(fake_api, status):
     responses, _ = fake_api
     responses.append((status, {"error": "nope"}))
     with pytest.raises(TranscriptServiceError):
         fetch_from_service("O6_u_SMHtgo")
+
+
+def test_retries_when_too_many_requests(fake_api):
+    responses, calls = fake_api
+    responses += [(429, {}), (200, {"content": SEGMENTS, "lang": "en"})]
+
+    assert len(fetch_from_service("O6_u_SMHtgo")["segments"]) == 2
+    assert len(calls) == 2
+
+
+def test_keeps_failing_429_pauses_the_service(fake_api):
+    responses, calls = fake_api
+    responses += [(429, {})] * (len(transcript_service.RETRY_DELAYS) + 1)
+    with pytest.raises(TranscriptServiceError):
+        fetch_from_service("O6_u_SMHtgo")
+
+    # credits probably used up: the next video doesn't call (and wait for) the service again
+    calls.clear()
+    with pytest.raises(TranscriptServiceError, match="skipping"):
+        fetch_from_service("O6_u_SMHtgo")
+    assert calls == []
 
 
 def test_loader_uses_service_then_falls_back(monkeypatch):
