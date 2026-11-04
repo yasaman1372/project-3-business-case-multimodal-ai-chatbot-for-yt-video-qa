@@ -1,0 +1,25 @@
+# Runtime dependencies — installed by Vercel for the deployed API.
+# Keep this lean: Vercel Python functions have a ~250 MB size limit.
+
+# --- API server ---
+fastapi
+
+# --- LLM / agent framework ---
+langchain
+langchain-openai
+langgraph
+langsmith
+
+# --- Vector database (hosted) ---
+pinecone
+langchain-pinecone
+
+# --- Speech-to-text (Whisper via OpenAI API) ---
+openai
+
+# --- YouTube (Data API v3 search + transcripts at runtime) ---
+youtube-transcript-api
+httpx
+
+# --- Utilities ---
+python-dotenv

@@ -1,0 +1,22 @@
+# Secrets
+.env
+
+# Virtual environment
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Generated data (keep folder structure via .gitkeep)
+data/raw/audio/*
+data/transcripts/*
+data/processed/*
+data/chroma_db/*
+!data/**/.gitkeep
+
+# OS / editor
+.DS_Store
+.vscode/
