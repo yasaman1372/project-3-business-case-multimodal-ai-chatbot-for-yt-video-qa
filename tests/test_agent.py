@@ -211,6 +211,17 @@ def test_find_videos_reports_youtube_blocking(monkeypatch):
     assert tools.find_videos_on_topic.invoke({"topic": "picasso", "question": "who is picasso"}, config=CONFIG).startswith("YOUTUBE_BLOCKED")
 
 
+@pytest.mark.parametrize("reasons", [["TranscriptLimitReached"], ["TranscriptLimitReached", "IpBlocked"]])
+def test_find_videos_reports_transcript_limit(monkeypatch, reasons):
+    monkeypatch.setattr(tools, "indexed_video_ids", lambda ns: {"BBBBBBBBBBB"})
+    monkeypatch.setattr(tools, "search_youtube", lambda topic, **kw: [{"id": "AAAAAAAAAAA", "title": "t", "channel": "c"}])
+    monkeypatch.setattr(tools, "index_videos", lambda videos, **kw: {
+        "indexed": [], "skipped": [], "chunks": 0,
+        "failed": [{"id": f"VIDEO{i:06d}", "title": "t", "reason": r} for i, r in enumerate(reasons)]})
+    result = tools.find_videos_on_topic.invoke({"topic": "picasso", "question": "who is picasso"}, config=CONFIG)
+    assert result.startswith("TRANSCRIPT_LIMIT")
+
+
 def test_find_videos_reports_missing_captions(monkeypatch):
     monkeypatch.setattr(tools, "indexed_video_ids", lambda ns: {"BBBBBBBBBBB"})
     monkeypatch.setattr(tools, "search_youtube", lambda topic, **kw: [{"id": "AAAAAAAAAAA", "title": "t", "channel": "c"}])

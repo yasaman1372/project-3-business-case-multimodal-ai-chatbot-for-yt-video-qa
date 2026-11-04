@@ -28,6 +28,8 @@ from ingestion.youtube_loader import (
     TRANSCRIPT_ERRORS,
     failure_reason,
     fetch_transcript,
+    is_blocked,
+    is_limit_reached,
     load_transcripts,
     parse_videos_file,
 )
@@ -72,8 +74,8 @@ def _fetch_best(videos: list[dict], topic: str | None, needed: int,
         got, lost = _fetch_in_parallel([v for v in batch if v["id"] not in cached], topic)
         transcripts += got
         failed += lost
-        if lost and all(f["reason"] in {"RequestBlocked", "IpBlocked"} for f in lost) and not got:
-            break  # YouTube is blocking us; more requests won't help
+        if lost and not got and all(is_blocked(f["reason"]) or is_limit_reached(f["reason"]) for f in lost):
+            break  # YouTube is blocking us (and the service is out of credits); more requests won't help
     return transcripts, reused, failed
 
 

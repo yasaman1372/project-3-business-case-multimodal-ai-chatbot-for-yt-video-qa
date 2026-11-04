@@ -8,7 +8,12 @@ import httpx
 import pytest
 
 from ingestion import transcript_service, youtube_loader
-from ingestion.transcript_service import TranscriptServiceError, TranscriptUnavailable, fetch_from_service
+from ingestion.transcript_service import (
+    TranscriptLimitReached,
+    TranscriptServiceError,
+    TranscriptUnavailable,
+    fetch_from_service,
+)
 
 SEGMENTS = [{"text": "Picasso was born", "offset": 1500, "duration": 2000, "lang": "en"},
             {"text": "  ", "offset": 3500, "duration": 500, "lang": "en"},
@@ -89,12 +94,12 @@ def test_retries_when_too_many_requests(fake_api):
 def test_keeps_failing_429_pauses_the_service(fake_api):
     responses, calls = fake_api
     responses += [(429, {})] * (len(transcript_service.RETRY_DELAYS) + 1)
-    with pytest.raises(TranscriptServiceError):
+    with pytest.raises(TranscriptLimitReached):
         fetch_from_service("O6_u_SMHtgo")
 
     # credits probably used up: the next video doesn't call (and wait for) the service again
     calls.clear()
-    with pytest.raises(TranscriptServiceError, match="skipping"):
+    with pytest.raises(TranscriptLimitReached, match="skipping"):
         fetch_from_service("O6_u_SMHtgo")
     assert calls == []
 
@@ -117,6 +122,28 @@ def test_loader_uses_service_then_falls_back(monkeypatch):
     monkeypatch.setattr(youtube_loader, "fetch_from_service", service_down)
     youtube_loader.fetch_transcript({"id": "AAAAAAAAAAA"})
     assert library_calls == ["AAAAAAAAAAA"]
+
+
+@pytest.mark.parametrize("service_error, reason", [
+    (TranscriptLimitReached("credits"), "TranscriptLimitReached"),  # real cause: credits used up
+    (TranscriptServiceError("outage"), "IpBlocked"),                 # other service problems
+])
+def test_loader_reports_limit_when_fallback_is_blocked(monkeypatch, service_error, reason):
+    from youtube_transcript_api import IpBlocked
+
+    monkeypatch.setattr(youtube_loader, "SUPADATA_API_KEY", "test-key")
+
+    def service(vid, langs):
+        raise service_error
+
+    def blocked(vid, langs):
+        raise IpBlocked(vid)
+    monkeypatch.setattr(youtube_loader, "fetch_from_service", service)
+    monkeypatch.setattr(youtube_loader, "_fetch_with_library", blocked)
+
+    with pytest.raises(youtube_loader.TRANSCRIPT_ERRORS) as e:
+        youtube_loader.fetch_transcript({"id": "AAAAAAAAAAA"})
+    assert youtube_loader.failure_reason(e.value) == reason
 
 
 def test_loader_does_not_fall_back_when_video_has_no_captions(monkeypatch):

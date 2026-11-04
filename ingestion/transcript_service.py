@@ -41,6 +41,10 @@ class TranscriptServiceError(Exception):
     """The service itself failed (bad key, quota, outage): fall back to another method."""
 
 
+class TranscriptLimitReached(TranscriptServiceError):
+    """Supadata keeps answering 429: most likely the monthly credits are used up."""
+
+
 def _request(client: httpx.Client, url: str, params: dict | None = None) -> httpx.Response:
     try:
         return client.get(url, params=params, headers={"x-api-key": SUPADATA_API_KEY}, timeout=30)
@@ -73,6 +77,8 @@ def _check(response: httpx.Response) -> dict:
         raise TranscriptUnavailable("VideoUnavailable", "video not found or private")
     if code == 403:
         raise TranscriptUnavailable("VideoRestricted", "video requires sign-in or is restricted")
+    if code == 429:
+        raise TranscriptLimitReached("Supadata rate or credit limit reached")
     raise TranscriptServiceError(f"Supadata HTTP {code}: {response.text[:200]}")
 
 
@@ -84,7 +90,7 @@ def fetch_from_service(video_id: str, languages: list[str] = TRANSCRIPT_LANGUAGE
     if not SUPADATA_API_KEY:
         raise TranscriptServiceError("SUPADATA_API_KEY is not set")
     if time.monotonic() < _limited_until:
-        raise TranscriptServiceError("Supadata rate or credit limit reached; skipping it for now")
+        raise TranscriptLimitReached("Supadata rate or credit limit reached; skipping it for now")
 
     params = {
         "url": f"https://www.youtube.com/watch?v={video_id}",

@@ -28,10 +28,18 @@ from app.config import (
     WEBSHARE_PROXY_USERNAME,
 )
 
-from ingestion.transcript_service import TranscriptServiceError, TranscriptUnavailable, fetch_from_service
+from ingestion.transcript_service import (
+    TranscriptLimitReached,
+    TranscriptServiceError,
+    TranscriptUnavailable,
+    fetch_from_service,
+)
 
 # Errors that mean "this video has no usable transcript" (try the next video)
 TRANSCRIPT_ERRORS = (CouldNotRetrieveTranscript, TranscriptUnavailable)
+
+# Failure reason when the transcript service's limit is reached and YouTube blocks the fallback
+LIMIT_REACHED = "TranscriptLimitReached"
 
 VIDEO_ID_PATTERN = re.compile(r"(?:v=|youtu\.be/|shorts/)([\w-]{11})")
 
@@ -95,6 +103,11 @@ def is_blocked(reason: str) -> bool:
     return reason in {"RequestBlocked", "IpBlocked"}
 
 
+def is_limit_reached(reason: str) -> bool:
+    """True if the transcript service's limit was reached (and YouTube blocked the fallback too)."""
+    return reason == LIMIT_REACHED
+
+
 def _fetch_with_library(video_id: str, languages: list[str]) -> dict:
     """Fallback: youtube-transcript-api directly (rate-limited by YouTube per IP)."""
     fetched = get_transcript_api().fetch(video_id, languages=languages)
@@ -111,16 +124,25 @@ def fetch_transcript(video: dict, languages: list[str] = TRANSCRIPT_LANGUAGES) -
     Uses the hosted transcript service when SUPADATA_API_KEY is set, and falls
     back to youtube-transcript-api if the service itself fails.
     Raises one of TRANSCRIPT_ERRORS if the video has no usable transcript
-    (or YouTube blocks the fallback request).
+    (or YouTube blocks the fallback request; reason LIMIT_REACHED if that happened
+    because the service's limit was reached).
     """
-    fetched = None
+    fetched, service_limited = None, False
     if SUPADATA_API_KEY:
         try:
             fetched = fetch_from_service(video["id"], languages)
         except TranscriptServiceError as e:
+            service_limited = isinstance(e, TranscriptLimitReached)
             print(f"  transcript service failed for {video['id']} ({e}); falling back to youtube-transcript-api")
     if fetched is None:
-        fetched = _fetch_with_library(video["id"], languages)
+        try:
+            fetched = _fetch_with_library(video["id"], languages)
+        except CouldNotRetrieveTranscript as e:
+            # Report the real cause: the service's credits ran out, YouTube's block is a side effect
+            if service_limited and is_blocked(failure_reason(e)):
+                raise TranscriptUnavailable(LIMIT_REACHED, "transcript service limit reached and "
+                                                           "YouTube blocked the fallback") from e
+            raise
 
     return {
         "video_id": video["id"],

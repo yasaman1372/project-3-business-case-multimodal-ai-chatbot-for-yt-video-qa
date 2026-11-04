@@ -23,10 +23,23 @@ from ingestion.build_index import index_videos
 from ingestion.find_videos import get_video_details as fetch_video_details  # length check for links
 from ingestion.find_videos import rank_by_relevance, search_youtube
 from ingestion.vector_store import chat_namespace, indexed_video_ids, limit_video_cache, prune_old_chat_namespaces
-from ingestion.youtube_loader import extract_video_id, is_blocked
+from ingestion.youtube_loader import extract_video_id, is_blocked, is_limit_reached
 
 YOUTUBE_BLOCKED = ("YOUTUBE_BLOCKED: YouTube is temporarily blocking transcript downloads from this server, "
                    "so {what} could not be read. This is not about the question; it usually clears after a while.")
+TRANSCRIPT_LIMIT = ("TRANSCRIPT_LIMIT: The transcript service has reached its monthly limit (and YouTube is "
+                    "blocking direct downloads), so {what} could not be read. This is not about the question. "
+                    "Videos already in this chat still work; new videos can be read again once the limit "
+                    "resets or the plan is upgraded.")
+
+
+def _download_problem(failed: list[dict], what: str) -> str | None:
+    """The message to return when every download failed because of blocking or the service limit."""
+    reasons = [f["reason"] for f in failed]
+    if not reasons or not all(is_blocked(r) or is_limit_reached(r) for r in reasons):
+        return None
+    template = TRANSCRIPT_LIMIT if any(is_limit_reached(r) for r in reasons) else YOUTUBE_BLOCKED
+    return template.format(what=what)
 
 
 def _namespace(config: RunnableConfig) -> str:
@@ -74,7 +87,9 @@ def find_videos_on_topic(topic: str, question: str, config: RunnableConfig) -> s
     videos = search_youtube(topic, count=CANDIDATES_PER_TOPIC, min_minutes=ON_DEMAND_MIN_MINUTES,
                             max_minutes=ON_DEMAND_MAX_MINUTES, skip_ids=already)
     if not videos:
-        return f"No suitable YouTube videos found for '{topic}'."
+        return (f"No suitable YouTube videos found for '{topic}'. Only videos of {ON_DEMAND_MIN_MINUTES}-"
+                f"{ON_DEMAND_MAX_MINUTES} minutes with spoken content can be used, so music mixes, "
+                "livestreams and very long videos are skipped.")
 
     # Keep the candidates whose title/description best match the question
     videos = rank_by_relevance(question, videos)
@@ -83,9 +98,11 @@ def find_videos_on_topic(topic: str, question: str, config: RunnableConfig) -> s
     titles = {v["id"]: f"{v['title']} ({v['channel']})" for v in videos}
 
     if not result["indexed"]:
-        if result["failed"] and all(is_blocked(f["reason"]) for f in result["failed"]):
-            return YOUTUBE_BLOCKED.format(what=f"the videos found for '{topic}'")
-        return f"Found videos for '{topic}', but none had usable captions."
+        problem = _download_problem(result["failed"], f"the videos found for '{topic}'")
+        if problem:
+            return problem
+        return (f"Found videos for '{topic}', but none had usable captions (videos without speech, "
+                "such as music or ambient videos, have no transcript).")
     lines = [f"Added {len(result['indexed'])} videos on '{topic}' to this chat:"]
     lines += [f"- {titles[vid]} (video_id: {vid})" for vid in result["indexed"]]
     lines.append("Now call search_video_transcripts to find the relevant passages.")
@@ -144,8 +161,9 @@ def add_video_by_url(url: str, config: RunnableConfig) -> str:
     _clean_up_before_first_videos(already)
     result = index_videos([video], topic=video["title"], save_files=False, namespace=namespace, max_videos=1)
     if not result["indexed"]:
-        if result["failed"] and is_blocked(result["failed"][0]["reason"]):
-            return YOUTUBE_BLOCKED.format(what=f"'{video['title']}'")
+        problem = _download_problem(result["failed"], f"'{video['title']}'")
+        if problem:
+            return problem
         return f"'{video['title']}' has no English captions, so its transcript can't be read."
     return (f"Added '{video['title']}' ({video['channel']}, video_id: {video_id}) to this chat. "
             "Now call search_video_transcripts with this video_id to answer a question about it, "
