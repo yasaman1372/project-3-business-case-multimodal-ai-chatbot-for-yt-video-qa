@@ -1,80 +1,130 @@
-![logo_ironhack_blue 7](https://user-images.githubusercontent.com/23629340/40541063-a07a0a8a-601a-11e8-91b5-2f13e4e6b441.png)
+# VideoQA: Ask YouTube Videos Anything
 
-# Project III | Business Case: Building a Multimodal AI ChatBot for YouTube Video QA
+**Live demo: [www.youtubchat.online](https://www.youtubchat.online)**
 
-Building a chatbot that can translate YouTube videos into text and allow for natural language querying offers several compelling business cases.
+VideoQA is a multimodal AI chatbot that answers questions from YouTube videos. Ask by text or voice, and the agent finds relevant videos, reads their transcripts, and answers with links that jump to the exact moment in the video.
 
-- Firstly, it improves accessibility for users with hearing impairments or those who prefer reading over watching videos, thereby broadening the audience reach and enhancing brand reputation.
-- Secondly, it enables efficient indexing and searching of video content, allowing users to quickly find specific information within videos, which is particularly useful for educational content and tutorials.
-- Thirdly, it improves customer support by leveraging existing video content to provide instant, accurate responses to customer queries, thus reducing support costs and improving response times.
-- Additionally, it serves educational and training purposes by enhancing the learning experience, enabling easy querying and access to specific segments of instructional videos. From an SEO and content marketing perspective, video transcripts can significantly boost website traffic and video discoverability by improving search engine indexing. Lastly, supporting multiple languages allows the chatbot to cater to a global audience, expanding market reach and enhancing user engagement.
+It was built as Project III of the Ironhack AI program. The original assignment is in [docs/project-brief.md](docs/project-brief.md).
 
-### Project Overview
+## Features
 
-The goal of this final project is to develop a RAG system or AI bot that combines the power of text and audio processing to answer questions about YouTube videos. The bot will utilize natural language processing (NLP) techniques and speech recognition to analyze both textual and audio input, extract relevant information from YouTube videos, and provide accurate answers to user queries.
+- **Ask about any topic:** the agent searches YouTube, picks the most relevant videos, and reads them on demand.
+- **Paste a video link:** add one specific video to the chat, then ask about it or get a summary.
+- **Answers grounded in transcripts:** every answer comes from the videos and cites clickable timestamps. If the videos don't cover a question, the bot says so instead of guessing.
+- **Voice input:** speak through the microphone or upload an audio/video file with your question.
+- **Conversation memory:** follow-up questions keep the context of the chat.
+- **Web and phone:** use it in the browser or install it as an app.
 
-### Key Objectives
+### Install on your phone
 
-1. Develop a text-based question answering (QA) model using pre-trained language models. You may find it useful to fine-tune your model.
-2. Integrate speech recognition capabilities to convert audio/video input (user questions) into text transcripts.
-3. Build a conversational interface for users to interact with the bot via text or voice input. The latter is not a must.
-4. Retrieve, analyze, and store into a vector database (pinecone, chromabd...) YouTube video content to generate answers to user questions.
-5. Test and evaluate the bot's performance in accurately answering questions about YouTube videos.
-6. Your AI must use agents with several tools and memory.
+- **iPhone (Safari):** open the site, tap Share, then **Add to Home Screen**.
+- **Android (Chrome):** open the site, tap ⋮, then **Install app**.
 
-### Incorporating LangChain & LangSmith
+## How it works
 
-To enhance the project with LangChain, you can utilize LangChain agents and functions for various tasks:
+```mermaid
+flowchart TD
+    U[User: text or voice] --> F[React app]
+    F --> B[FastAPI backend]
+    B --> S[OpenAI speech-to-text]
+    B --> A[LangChain agent with memory]
+    A --> T[Agent tools]
+    T --> Y[YouTube Data API: find videos]
+    T --> R[Supadata: fetch transcripts]
+    T --> P[(Pinecone: chunks and embeddings)]
+    P --> A
+    A --> O[Answer with timestamp links]
+```
 
-1. **Text Preprocessing:**
-   - Use LangChain functions for tokenization, lemmatization, and other text preprocessing tasks as you see fit.
+1. The agent decides which tool to call for each message.
+2. For a new topic, it searches YouTube and ranks the results by relevance to the question.
+3. Transcripts are cleaned, split into chunks of about 250 words, embedded, and stored in Pinecone.
+4. Each chat gets its own Pinecone namespace. Videos are also kept in a shared cache, so later chats can reuse them without fetching or embedding them again.
+5. The agent retrieves the most relevant passages and writes an answer with timestamp citations.
 
-2. **QA Model Development:**
-   - Utilize LangChain agents for fine-tuning pre-trained language models from HuggingFace or OpenAI for question answering tasks. If you use OpenAI api key provide by Ironhack, be mindful of the limited credits available for the entire class.
+### Agent tools
 
-3. **Speech Recognition Integration:**
-   - Incorporate LangChain agents for integrating speech recognition capabilities into the bot, allowing it to process audio and/or text inputs.
+| Tool | Purpose |
+|---|---|
+| `search_video_transcripts` | Semantic search over the videos in this chat |
+| `find_videos_on_topic` | Find, read, and embed new videos about a topic |
+| `add_video_by_url` | Add one video from a pasted link |
+| `list_videos_in_this_chat` | List the videos found so far |
+| `get_video_transcript` | Get a full transcript, for summaries |
 
-4. **Conversational Interface:**
-   - Design conversational flows using LangChain agents to handle user interactions and route queries to the appropriate processing modules.
+## Tech stack
 
-5. **YouTube Video Retrieval:**
-   - Develop LangChain agents for accessing YouTube video content and extracting relevant metadata for analysis.
+| Layer | Technology |
+|---|---|
+| Frontend | React, Vite, installable as a PWA |
+| Backend | FastAPI (Python 3.12) |
+| Agent | LangChain `create_agent`, LangGraph checkpointer |
+| LLM | OpenAI `gpt-5.4-mini` |
+| Embeddings | OpenAI `text-embedding-3-small` |
+| Speech-to-text | OpenAI `gpt-4o-mini-transcribe` |
+| Vector database | Pinecone |
+| Video search | YouTube Data API v3 |
+| Transcripts | Supadata, with `youtube-transcript-api` as a fallback |
+| Tracing and evaluation | LangSmith |
+| Hosting | Vercel |
 
-6. **Make use of a vector database of your choice**
+## Run locally
 
-7. **Make use of LangSmith platform for testing, evaluation, and deployment of your AI**
+You need Python 3.12, Node.js, and API keys for OpenAI, Pinecone, and the YouTube Data API. A Supadata key is recommended. LangSmith is optional.
 
-### Deliverables
+```bash
+# Backend
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env        # then fill in your keys
+uvicorn app.app:app --reload --port 8000
+```
 
-1. Source code for the multimodal bot implementation, including LangChain integration.
-2. Documentation detailing the project architecture, methodology, and LangChain usage.
-3. Presentation slides summarizing the project objectives, process, and results.
-4. This must be deployed as a web/mobile app.
+```bash
+# Frontend, in a second terminal
+cd frontend
+npm install
+npm run dev
+```
 
-### Project Timeline
+Open the URL that Vite prints. It forwards `/api` requests to the backend.
 
-- Day 1-2: Project kickoff, data collection, and text preprocessing using LangChain functions.
-- Day 3-4: QA model development with LangChain agents and speech recognition integration.
-- Day 5-6: Conversational interface development with LangChain agents and YouTube video retrieval.
-- Day 7: Testing, evaluation, documentation, and presentation preparation.
+## Testing and evaluation
 
-## Resources
+```bash
+pytest                                     # unit tests
+python -m evaluation.langsmith_eval        # LangSmith experiment
+python -m evaluation.langsmith_eval --local   # run without LangSmith, save results to a CSV
+```
 
-Below are some useful resources, but you don't have to use them.
+The evaluation runs the agent on the questions in [evaluation/eval_questions.csv](evaluation/eval_questions.csv) and scores the answers, including LLM-judged correctness and groundedness.
 
-- [YouTube](https://pypi.org/project/youtube-transcript-api/) Python [module](https://pypi.org/project/yt-dlp/2021.3.7/).
-- [Whisper LLM](https://huggingface.co/openai/whisper-large-v3)
-- Pre-trained language models available in libraries like [HuggingFace](https://huggingface.co/) Transformers.
-- [LangChain](https://python.langchain.com/v0.1/docs/get_started/quickstart/) for text preprocessing, model development, and conversational interface design.
-- [LangSmith](https://www.langchain.com/langsmith) for testing, performance checks, and [deploying](https://langchain-ai.github.io/langgraph/cloud/quick_start/#test-the-graph-build-locally) your model and app.
+## Deployment
 
-## Evaluation Criteria
+The app runs on Vercel: [vercel.json](vercel.json) builds the React frontend and serves the FastAPI backend as a Python function under `/api`.
 
-- Accuracy of the bot in answering user questions about YouTube videos.
-- Usability and responsiveness of the conversational interface (latency).
-- Documentation quality and clarity of presentation slides.
+To deploy your own copy, import the repository in Vercel, keep the root directory as `./`, and add these environment variables:
 
-## Conclusion
+`OPENAI_API_KEY`, `PINECONE_API_KEY`, `PINECONE_INDEX_NAME`, `YOUTUBE_API_KEY`, `SUPADATA_API_KEY`
 
-This final project offers an exciting opportunity to explore the intersection of NLP, speech recognition, and multimedia analysis in building a multimodal bot for YouTube video QA. By leveraging state-of-the-art techniques and technologies, including LangChain, you will gain valuable hands-on experience in developing innovative AI applications with real-world impact. You may find it to focus on my topic like health, nutrition, astrophysics...but this is an open ended project in some ways. So, feel free to build something you will be proud of. If you have other source of data other than YouTube you are free to use it.
+Add `LANGSMITH_API_KEY`, `LANGSMITH_TRACING=true`, and `LANGSMITH_PROJECT` to enable tracing.
+
+## Project structure
+
+```text
+api/          Vercel entry point
+app/          FastAPI app, agent, tools, retrieval, memory, speech-to-text
+ingestion/    YouTube search, transcripts, chunking, embeddings, Pinecone
+frontend/     React chat interface and PWA files
+evaluation/   Evaluation questions, metrics, LangSmith runs
+tests/        Unit tests
+docs/         Architecture and project brief
+```
+
+## Known limitations
+
+- Only videos with English captions can be read. Videos without captions are skipped.
+- The free Supadata plan allows 100 transcripts per month. Videos already in the shared cache don't use any.
+- The YouTube Data API's free quota allows roughly 100 searches per day.
+- Conversation memory is held in server memory, so on Vercel a chat can lose its context between messages. A Postgres checkpointer would fix this.
