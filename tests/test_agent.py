@@ -13,6 +13,7 @@ CONFIG = {"configurable": {"thread_id": "1700000000-abc"}}
 @pytest.fixture(autouse=True)
 def no_ranking(monkeypatch):
     monkeypatch.setattr(tools, "rank_by_relevance", lambda question, videos: videos)
+    monkeypatch.setattr(tools, "prune_old_conversations", lambda: None)  # never touch a real database
 
 
 def test_all_tools_have_descriptions_and_hide_config():
@@ -42,6 +43,7 @@ def test_find_videos_indexes_into_this_chat(monkeypatch):
     calls = {}
     monkeypatch.setattr(tools, "indexed_video_ids", lambda ns: set())
     monkeypatch.setattr(tools, "prune_old_chat_namespaces", lambda: calls.update(pruned=True))
+    monkeypatch.setattr(tools, "prune_old_conversations", lambda: calls.update(memory_pruned=True))
     monkeypatch.setattr(tools, "limit_video_cache", lambda: calls.update(cache_checked=True))
     monkeypatch.setattr(tools, "search_youtube", lambda topic, **kw: [
         {"id": "AAAAAAAAAAA", "title": "Rome falls", "channel": "History Ch"}])
@@ -53,6 +55,7 @@ def test_find_videos_indexes_into_this_chat(monkeypatch):
     assert calls["namespace"] == "chat-1700000000-abc"
     assert calls["save_files"] is False
     assert calls["pruned"] is True and calls["cache_checked"] is True  # new chat triggers cleanup
+    assert calls["memory_pruned"] is True
     assert "Rome falls (History Ch)" in result
 
 

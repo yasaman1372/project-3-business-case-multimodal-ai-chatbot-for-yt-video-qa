@@ -35,6 +35,7 @@ WEBSHARE_PROXY_PASSWORD = os.getenv("WEBSHARE_PROXY_PASSWORD")
 TRANSCRIPT_PROXY_URL = os.getenv("TRANSCRIPT_PROXY_URL")        # or any http(s) proxy URL
 PINECONE_CLOUD = "aws"
 PINECONE_REGION = "us-east-1"  # the free Starter plan only supports aws/us-east-1
+DATABASE_URL = os.getenv("DATABASE_URL")  # Postgres for conversation memory; unset = keep it in RAM
 
 # --- YouTube ---
 TRANSCRIPT_LANGUAGES = ["en"]  # preferred transcript languages, in order

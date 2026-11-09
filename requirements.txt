@@ -11,6 +11,11 @@ langchain-openai
 langgraph
 langsmith
 
+# --- Conversation memory (hosted Postgres) ---
+langgraph-checkpoint-postgres
+psycopg[binary]
+psycopg-pool
+
 # --- Vector database (hosted) ---
 pinecone
 langchain-pinecone

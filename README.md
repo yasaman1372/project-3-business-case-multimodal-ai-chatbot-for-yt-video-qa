@@ -63,6 +63,7 @@ flowchart TD
 | Embeddings | OpenAI `text-embedding-3-small` |
 | Speech-to-text | OpenAI `gpt-4o-mini-transcribe` |
 | Vector database | Pinecone |
+| Conversation memory | Postgres (LangGraph `PostgresSaver`) |
 | Video search | YouTube Data API v3 |
 | Transcripts | Supadata, with `youtube-transcript-api` as a fallback |
 | Tracing and evaluation | LangSmith |
@@ -106,7 +107,9 @@ The app runs on Vercel: [vercel.json](vercel.json) builds the React frontend and
 
 To deploy your own copy, import the repository in Vercel, keep the root directory as `./`, and add these environment variables:
 
-`OPENAI_API_KEY`, `PINECONE_API_KEY`, `PINECONE_INDEX_NAME`, `YOUTUBE_API_KEY`, `SUPADATA_API_KEY`
+`OPENAI_API_KEY`, `PINECONE_API_KEY`, `PINECONE_INDEX_NAME`, `YOUTUBE_API_KEY`, `SUPADATA_API_KEY`, `DATABASE_URL`
+
+`DATABASE_URL` is a Postgres connection string, for example the pooled URL from a free [Neon](https://neon.tech) database. The tables are created automatically on the first request. Without it, a chat can lose its context between messages on Vercel.
 
 Add `LANGSMITH_API_KEY`, `LANGSMITH_TRACING=true`, and `LANGSMITH_PROJECT` to enable tracing.
 
@@ -127,4 +130,4 @@ docs/         Architecture and project brief
 - Only videos with English captions can be read. Videos without captions are skipped.
 - The free Supadata plan allows 100 transcripts per month. Videos already in the shared cache don't use any.
 - The YouTube Data API's free quota allows roughly 100 searches per day.
-- Conversation memory is held in server memory, so on Vercel a chat can lose its context between messages. A Postgres checkpointer would fix this.
+- Chats are temporary: a chat's videos and saved memory are deleted when the chat ends, or after 24 hours if nobody closes it.

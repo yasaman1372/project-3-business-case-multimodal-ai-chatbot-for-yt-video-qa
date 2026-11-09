@@ -18,6 +18,7 @@ from app.config import (
     ON_DEMAND_MIN_MINUTES,
     VIDEOS_PER_TOPIC,
 )
+from app.memory import prune_old_conversations
 from app.retrieval import format_results, get_video_text, list_videos, search
 from ingestion.build_index import index_videos
 from ingestion.find_videos import get_video_details as fetch_video_details  # length check for links
@@ -50,6 +51,7 @@ def _clean_up_before_first_videos(already: set[str]) -> None:
     """When a chat gets its first videos, delete abandoned chats and keep the video cache small."""
     if not already:
         prune_old_chat_namespaces()
+        prune_old_conversations()
         limit_video_cache()
 
 
